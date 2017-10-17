@@ -4,17 +4,25 @@ const fs = require('fs');
 
 // 登录状态
 let logined = false;
+let loginInfo = {};
 
 class Option {
   constructor(obj) {
     if(!obj.headers) obj.headers = {};
     Object.assign(obj.headers, basicHeaders);
-    for (let key in CookieCan) {
-      if (CookieCan.hasOwnProperty(key)) {
-        if(obj.hostname.indexOf(CookieCan[key].domain.replace('*', '')) != -1 &&
-           obj.path.indexOf(CookieCan[key].path) != -1) obj.headers.cookie += key + '=' + CookieCan[key].value + ';';
+    let cookies = {};
+    CookieCan.forEach(({key, value, path, domain}, index, CookieCan) => {
+      if(obj.hostname.indexOf(domain.replace('*', '')) != -1 &&
+      obj.path.indexOf(path) != -1) {
+        if (cookies[key] && cookies[key].domain.length > path.length) return;
+        if (key == 'airkey') return;
+        cookies[key] = {key, value, path, domain};
       }
+    });
+    for (let key in cookies) {
+      obj.headers.cookie += key + '=' + cookies[key].value + '; ';
     }
+    obj.headers.cookie = obj.headers.cookie.slice(0, -1);
     return obj;
   }
 }
@@ -27,7 +35,41 @@ const basicHeaders = {
   'Accept-Language': 'zh-TW,zh;q=0.8,en-US;q=0.6,en;q=0.4,zh-CN;q=0.2',
 };
 
-const CookieCan = {};
+/* jshint ignore:start */
+function r(c) {
+	return (c || "") + Math.round(2147483647 * (Math.random() || .5)) * +new Date % 1E10
+}
+/* jshint ignore:end */
+
+const CookieCan = [];
+
+CookieCan.push({
+  'key': 'pgv_pvi',
+  'value': r(),
+  'path': '/',
+  'domain': 'qq.com'
+});
+
+CookieCan.push({
+  'key': 'pgv_si',
+  'value': r('s'),
+  'path': '/',
+  'domain': 'qq.com'
+});
+
+CookieCan.push({
+  'key': 'ptisp',
+  'value': 'cnc',
+  'path': '/',
+  'domain': 'qq.com'
+});
+
+CookieCan.push({
+  'key': 'RK',
+  'value': 'jcnicGbKPg',
+  'path': '/',
+  'domain': 'qq.com'
+});
 
 // 对响应做基本的处理
 let reciver = (callback) => (res) => {
@@ -35,9 +77,26 @@ let reciver = (callback) => (res) => {
   // set cookie
   if (setCookies) {
     for (let i = 0; i < setCookies.length; i++) {
-      let result = /^(.*?)=(.*?);\s*(?:EXPIRES=(.*?);)?\s*(?:PATH=(.*?);)?\s*(?:DOMAIN=(.*?);)?\s*(HttpOnly)?$/i.exec(setCookies[i]);
-      let [, key, value, expires, path, domain] = result;
-      CookieCan[key] = {key, value, path, domain};
+      let result = {};
+      let args = setCookies[i].split(';');
+      let index = args[0].indexOf('=');
+      args[0] = args[0].trim();
+      if (index != -1) {
+        result.key = args[0].slice(0, index);
+        result.value = args[0].slice(index + 1);
+      } else {
+        result.key = args[0];
+        result.value = '';
+      }
+      for (let i = 1; i < args.length; i++) {
+        args[i] = args[i].trim();
+        let index = args[i].indexOf('=');
+        if (index == -1) continue;
+        result[args[i].slice(0, index).toLowerCase()] = args[i].slice(index + 1);
+      }
+      if (!result.domain) result.domain = res.client._host;
+      if (!result.path) result.path = '/';
+      CookieCan.push(result);
     }
   }
 
@@ -52,15 +111,15 @@ let reciver = (callback) => (res) => {
   res.on('end', () => {
     buffer = Buffer.concat(chunks, size);
 
-    if(res.headers['content-cncoding'] == 'gzip') {
+    if (res.headers['content-encoding'] == 'gzip') {
       zlib.unzip(buffer, (err, buffer) => {
         if (err) return console.log(err);
         res.data = buffer.toString();
-        callback(res, buffer);
+        if (callback) callback(res, buffer);
       });
     } else {
       res.data = buffer.toString();
-      callback(res, buffer);
+      if (callback) callback(res, buffer);
     }
   });
 };
@@ -71,16 +130,12 @@ function getQrcode(callback) {
     'method': 'GET',
     'hostname': 'ssl.ptlogin2.qq.com',
     'path': '/ptqrshow?appid=501004106&e=2&l=M&s=3&d=72&v=4&t=' + Math.random() + '&daid=164&pt_3rd_aid=0',
-  }), reciver((res) => {
+  }), reciver((res, buffer) => {
     confirmQRCodeState(callback);
-    if (res.headers['content-type'] == 'image/png') {
-      return fs.writeFile('qrcode.png', buffer, (err) => {
-        if(err) console.log(err);
-        console.log('QRcode refresh');
-      });
-    }
-
-    console.log(res.data);
+    return fs.writeFile('qrcode.png', buffer, (err) => {
+      if(err) return console.log(err);
+      console.log('QRcode refresh');
+    });
   }));
 
   req.end();
@@ -88,13 +143,20 @@ function getQrcode(callback) {
 
 function confirmQRCodeState(callback) {
   let qrsig = CookieCan.qrsig;
-  qrsig = qrsig ?  qrsig.value : 0;
+  if (!qrsig) {
+    for (let i = CookieCan.length - 1; i >= 0; i--) {
+      if (CookieCan[i].key == 'qrsig') {
+        qrsig = CookieCan[i].value;
+      }
+    }
+  }
   let req = http.request(new Option({
     'method': 'GET',
     'hostname': 'ssl.ptlogin2.qq.com',
     'path': '/ptqrlogin?u1=http%3A%2F%2Fw.qq.com%2Fproxy.html&ptqrtoken=' + pt.hash33(pt.cookie.get(qrsig)) +
     '&ptredirect=0&h=1&t=1&g=1&from_ui=1&ptlang=2052&action=0-0-' + Date.now() + '&js_ver=10230&js_type=1&login_sig=&pt_uistyle=40&aid=501004106&daid=164&mibao_css=m_webqq&',
   }), reciver((res, buffer) => {
+    console.log(res.data);
     let state, url, describe, nickName;
     let result = /^ptuiCB\('(.*?)',\s*'(.*?)',\s*'(.*?)',\s*'(.*?)',\s*'(.*?)',\s*'(.*?)'\);\s*$/.exec(res.data);
     if (result) [, state, , url, , describe, nickName] = result;
@@ -106,12 +168,38 @@ function confirmQRCodeState(callback) {
     if (state == 0) {
       logined = true;
       console.log(describe);
+      loginInfo = getQueryStringArgs(url);
       return callback ? callback(url) : undefined;
     }
     setTimeout(() => confirmQRCodeState(callback), 1000);
   }));
 
   req.end();
+}
+
+function getQueryStringArgs (url) {
+    //获取查询字符串并去掉问号
+    let index = url.indexOf('?');
+    if (!index) return;
+    let qs = url.slice(index + 1);
+    //初始化变量
+    let args = {},
+        items = qs.length ? qs.split("&") : [],
+        item = null,
+        name = null,
+        value = null,
+        i = 0,
+        len = items.length;
+    //对每一项参数添加到 args 中作为 args 的属性
+    for (i=0; i < len; i++) {
+        item = items[i].split("=");
+        name = decodeURIComponent(item[0]);
+        value = decodeURIComponent(item[1]);
+        if (name.length) {
+            args[name] = value;
+        }
+    }
+    return args;
 }
 
 const pt = {
@@ -138,10 +226,123 @@ const pt = {
 
 
 function login(callback) {
-  getQrcode(callback);
+  new Promise((resolve, reject) => getQrcode(url => resolve(url)))
+  .then((url) => new Promise((resolve, reject) => getPtwebqq(url, () => resolve())))
+  .then(() => new Promise((resolve, reject) => {
+    // login2(callback);
+    getVfwebqq();
+  }));
 }
+
+function getPtwebqq(url, callback) {
+  let index = url.lastIndexOf('/');
+  let path = url.slice(index);
+  let req = http.request(new Option({
+    'method': 'GET',
+    'upgrade-insecure-requests': '1',
+    'hostname': 'ptlogin2.web2.qq.com',
+    'path': path
+  }), reciver((res, buffer) => {
+    if (callback) callback();
+  }));
+
+  req.end();
+}
+
+function getVfwebqq(callback) {
+  let req = http.request(new Option({
+    'method': 'GET',
+    'hostname': 's.web2.qq.com',
+    'connection': 'keep-alive',
+    'content-type': 'utf-8',
+    'path': '/api/getvfwebqq?ptwebqq=&clientid=53999199&psessionid=&t=' + Date.now(),
+    'referer': 'http://s.web2.qq.com/proxy.html?v=20130916001&callback=1&id=1'
+  }), reciver((res, buffer) => {
+    console.log(res.data);
+  }));
+
+  req.end();
+}
+
+function login2(callback) {
+  let req = http.request(new Option({
+    'method': 'POST',
+    'hostname': 'd1.web2.qq.com',
+    'path': '/channel/login2',
+    'content-type': 'application/x-www-form-urlencoded',
+    'content-length': '116',
+    'Origin': 'http://d1.web2.qq.com',
+    'Referer': 'http://d1.web2.qq.com/proxy.html?v=20151105001&callback=1&id=2'
+  }), reciver((res, buffer) => {
+    let data = JSON.parse(res.data);
+    CookieCan.vfwebqq = data.result.vfwebqq;
+    CookieCan.uin = data.result.uin;
+    console.log(data);
+    if (callback) callback();
+  }));
+
+  req.write('r=%7B%22ptwebqq%22%3A%22%22%2C%22clientid%22%3A53999199%2C%22psessionid%22%3A%22%22%2C%22status%22%3A%22online%22%7D');
+  req.end();
+}
+
+function getFriends() {
+  let req = http.request(new Option({
+    'method': 'POST',
+    'hostname': 's.web2.qq.com',
+    'path': '/api/get_user_friends2',
+    'referer': 'http://s.web2.qq.com/proxy.html?v=20130916001&callback=1&id=1',
+    'origin': 'http://s.web2.qq.com',
+    'connection': 'keep-alive',
+    'content-type': 'application/x-www-form-urlencoded',
+  }), reciver((res, buffer) => {
+    console.log(res.data);
+  }));
+
+  req.write('r=%7B%22vfwebqq%22%3A%22' + CookieCan.vfwebqq + '%22%2C%22hash%22%3A%22' + hash2(CookieCan.uin, '') + '%22%7D');
+  req.end();
+}
+
+/* jshint ignore:start */
+hash2 = function(uin,ptvfwebqq){
+    uin += "";
+    var ptb = [];
+    for (var i=0;i<ptvfwebqq.length;i++){
+        var ptbIndex = i%4;
+        ptb[ptbIndex] ^= ptvfwebqq.charCodeAt(i);
+    }
+    var salt = ["EC", "OK"];
+    var uinByte = [];
+    uinByte[0] = (((uin >> 24) & 0xFF) ^ salt[0].charCodeAt(0));
+    uinByte[1] = (((uin >> 16) & 0xFF) ^ salt[0].charCodeAt(1));
+    uinByte[2] = (((uin >> 8) & 0xFF) ^ salt[1].charCodeAt(0));
+    uinByte[3] = ((uin & 0xFF) ^ salt[1].charCodeAt(1));
+    var result = [];
+    for (var i=0;i<8;i++){
+        if (i%2 == 0)
+            result[i] = ptb[i>>1];
+        else
+            result[i] = uinByte[i>>1];
+    }
+    return byte2hex(result);
+};
+
+var byte2hex = function(bytes){//bytes array
+    var hex = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'];
+    var buf = "";
+
+    for (var i=0;i<bytes.length;i++){
+        buf += (hex[(bytes[i]>>4) & 0xF]);
+        buf += (hex[bytes[i] & 0xF]);
+    }
+    return buf;
+}
+/* jshint ignore:end */
 
 exports.login = login;
 Object.defineProperty(exports, 'logined', {
   get: () => logined
 });
+Object.defineProperty(exports, 'loginInfo', {
+  get: () => loginInfo
+});
+exports.getFriends = getFriends;
