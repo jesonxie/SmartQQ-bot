@@ -14,7 +14,7 @@ class Option {
     CookieCan.forEach(({key, value, path, domain}, index, CookieCan) => {
       if(obj.hostname.indexOf(domain.replace('*', '')) != -1 &&
       obj.path.indexOf(path) != -1) {
-        if (cookies[key] && cookies[key].domain.length > path.length) return;
+        if (cookies[key] && cookies[key].domain.length > domain.length) return;
         if (key == 'airkey') return;
         cookies[key] = {key, value, path, domain};
       }
@@ -228,10 +228,13 @@ const pt = {
 function login(callback) {
   new Promise((resolve, reject) => getQrcode(url => resolve(url)))
   .then((url) => new Promise((resolve, reject) => getPtwebqq(url, () => resolve())))
-  .then(() => new Promise((resolve, reject) => {
-    // login2(callback);
-    getVfwebqq();
-  }));
+  .then(() => Promise.all([
+    new Promise((resolve, reject) => getVfwebqq(() => resolve())),
+    new Promise((resolve, reject) => login2(() => resolve())),
+  ]))
+  .then(() => {
+    if (callback) callback();
+  });
 }
 
 function getPtwebqq(url, callback) {
@@ -239,9 +242,11 @@ function getPtwebqq(url, callback) {
   let path = url.slice(index);
   let req = http.request(new Option({
     'method': 'GET',
-    'upgrade-insecure-requests': '1',
     'hostname': 'ptlogin2.web2.qq.com',
-    'path': path
+    'path': path,
+    'headers': {
+      'upgrade-insecure-requests': '1',
+    }
   }), reciver((res, buffer) => {
     if (callback) callback();
   }));
@@ -253,12 +258,16 @@ function getVfwebqq(callback) {
   let req = http.request(new Option({
     'method': 'GET',
     'hostname': 's.web2.qq.com',
-    'connection': 'keep-alive',
     'content-type': 'utf-8',
     'path': '/api/getvfwebqq?ptwebqq=&clientid=53999199&psessionid=&t=' + Date.now(),
-    'referer': 'http://s.web2.qq.com/proxy.html?v=20130916001&callback=1&id=1'
+    'headers': {
+      'referer': 'http://s.web2.qq.com/proxy.html?v=20130916001&callback=1&id=1',
+      'connection': 'keep-alive'
+    }
   }), reciver((res, buffer) => {
-    console.log(res.data);
+    let data = JSON.parse(res.data);
+    loginInfo.vfwebqq = data.result.vfwebqq;
+    if (callback) callback();
   }));
 
   req.end();
@@ -270,13 +279,14 @@ function login2(callback) {
     'hostname': 'd1.web2.qq.com',
     'path': '/channel/login2',
     'content-type': 'application/x-www-form-urlencoded',
-    'content-length': '116',
-    'Origin': 'http://d1.web2.qq.com',
-    'Referer': 'http://d1.web2.qq.com/proxy.html?v=20151105001&callback=1&id=2'
+    'headers': {
+      'Origin': 'http://d1.web2.qq.com',
+      'Referer': 'http://d1.web2.qq.com/proxy.html?v=20151105001&callback=1&id=2'
+    }
   }), reciver((res, buffer) => {
     let data = JSON.parse(res.data);
-    CookieCan.vfwebqq = data.result.vfwebqq;
-    CookieCan.uin = data.result.uin;
+    loginInfo.uin = data.result.uin;
+    loginInfo.psessionid = data.result.psessionid;
     console.log(data);
     if (callback) callback();
   }));
@@ -290,10 +300,12 @@ function getFriends() {
     'method': 'POST',
     'hostname': 's.web2.qq.com',
     'path': '/api/get_user_friends2',
-    'referer': 'http://s.web2.qq.com/proxy.html?v=20130916001&callback=1&id=1',
-    'origin': 'http://s.web2.qq.com',
-    'connection': 'keep-alive',
     'content-type': 'application/x-www-form-urlencoded',
+    'headers': {
+      'referer': 'http://s.web2.qq.com/proxy.html?v=20130916001&callback=1&id=1',
+      'origin': 'http://s.web2.qq.com',
+      'connection': 'keep-alive',
+    }
   }), reciver((res, buffer) => {
     console.log(res.data);
   }));
