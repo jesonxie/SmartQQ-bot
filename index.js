@@ -1,5 +1,5 @@
 const qq = require('./qq');
 
 qq.login(() => {
-  qq.getFriends();
+  qq.getFriends(() => console.log(qq.friends));
 });

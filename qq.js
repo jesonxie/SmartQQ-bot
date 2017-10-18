@@ -7,6 +7,10 @@ const util = require('util');
 let logined = false;
 let loginInfo = {};
 let friends = {};
+let friendsCategories = [];
+let groups = {};
+let groupCategories = [];
+let discusList = {};
 
 class Option {
   constructor(obj) {
@@ -297,7 +301,7 @@ function login2(callback) {
   req.end();
 }
 
-function getFriends() {
+function getFriends(callback) {
   let data = util.format('r={"vfwebqq":"%s","hash":"%s"}', loginInfo.vfwebqq, hash2(loginInfo.uin, ''));
   data = encodeURI(data);
   let req = http.request(new Option({
@@ -313,9 +317,17 @@ function getFriends() {
     }
   }), reciver((res, buffer) => {
     let data = JSON.parse(res.data);
-    friends = parseFriends(data.result);
+    friends = parseFriendsData(data.result);
+    if (callback) callback();
   }));
   req.end(data);
+}
+
+function parseFriendsData({categories, friends: fris, info, marknames, vipinfo}) {
+  categories.forEach((catg, index, array) => (friendsCategories[catg.sort] = catg));
+  fris.forEach((friend, index, array) => (friends[friend.uin] = friend));
+  info.forEach((infor, index, array) => Object.assign(friends[infor.uin], infor));
+  marknames.forEach((markname, index, array) => friends[markname.uin].markname = markname.markname);
 }
 
 /* jshint ignore:start */
@@ -362,3 +374,7 @@ Object.defineProperty(exports, 'loginInfo', {
   get: () => loginInfo
 });
 exports.getFriends = getFriends;
+exports.friends = friends;
+exports.friendsCategories = friendsCategories;
+exports.groupCategories = groupCategories;
+exports.groups = groups;
