@@ -1,10 +1,12 @@
 const http = require('http');
 const zlib = require('zlib');
 const fs = require('fs');
+const util = require('util');
 
 // 登录状态
 let logined = false;
 let loginInfo = {};
+let friends = {};
 
 class Option {
   constructor(obj) {
@@ -158,7 +160,7 @@ function confirmQRCodeState(callback) {
   }), reciver((res, buffer) => {
     console.log(res.data);
     let state, url, describe, nickName;
-    let result = /^ptuiCB\('(.*?)',\s*'(.*?)',\s*'(.*?)',\s*'(.*?)',\s*'(.*?)',\s*'(.*?)'\);\s*$/.exec(res.data);
+    let result = /^ptuiCB\('(.*?)',\s*'(.*?)',\s*'(.*?)',\s*'(.*?)',\s*'(.*?)',\s*'(.*?)'\)/.exec(res.data);
     if (result) [, state, , url, , describe, nickName] = result;
     state = parseInt(state);
     if (state == 65) {
@@ -296,22 +298,24 @@ function login2(callback) {
 }
 
 function getFriends() {
+  let data = util.format('r={"vfwebqq":"%s","hash":"%s"}', loginInfo.vfwebqq, hash2(loginInfo.uin, ''));
+  data = encodeURI(data);
   let req = http.request(new Option({
     'method': 'POST',
     'hostname': 's.web2.qq.com',
     'path': '/api/get_user_friends2',
-    'content-type': 'application/x-www-form-urlencoded',
     'headers': {
       'referer': 'http://s.web2.qq.com/proxy.html?v=20130916001&callback=1&id=1',
       'origin': 'http://s.web2.qq.com',
       'connection': 'keep-alive',
+      'content-type': 'application/x-www-form-urlencoded',
+      'content-length': data.length,
     }
   }), reciver((res, buffer) => {
-    console.log(res.data);
+    let data = JSON.parse(res.data);
+    friends = parseFriends(data.result);
   }));
-
-  req.write('r=%7B%22vfwebqq%22%3A%22' + CookieCan.vfwebqq + '%22%2C%22hash%22%3A%22' + hash2(CookieCan.uin, '') + '%22%7D');
-  req.end();
+  req.end(data);
 }
 
 /* jshint ignore:start */
