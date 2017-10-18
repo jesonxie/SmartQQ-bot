@@ -41,41 +41,7 @@ const basicHeaders = {
   'Accept-Language': 'zh-TW,zh;q=0.8,en-US;q=0.6,en;q=0.4,zh-CN;q=0.2',
 };
 
-/* jshint ignore:start */
-function r(c) {
-	return (c || "") + Math.round(2147483647 * (Math.random() || .5)) * +new Date % 1E10
-}
-/* jshint ignore:end */
-
 const CookieCan = [];
-
-CookieCan.push({
-  'key': 'pgv_pvi',
-  'value': r(),
-  'path': '/',
-  'domain': 'qq.com'
-});
-
-CookieCan.push({
-  'key': 'pgv_si',
-  'value': r('s'),
-  'path': '/',
-  'domain': 'qq.com'
-});
-
-CookieCan.push({
-  'key': 'ptisp',
-  'value': 'cnc',
-  'path': '/',
-  'domain': 'qq.com'
-});
-
-CookieCan.push({
-  'key': 'RK',
-  'value': 'jcnicGbKPg',
-  'path': '/',
-  'domain': 'qq.com'
-});
 
 // 对响应做基本的处理
 let reciver = (callback) => (res) => {
@@ -184,7 +150,6 @@ function confirmQRCodeState(callback) {
 }
 
 function getQueryStringArgs (url) {
-    //获取查询字符串并去掉问号
     let index = url.indexOf('?');
     if (!index) return;
     let qs = url.slice(index + 1);
@@ -208,27 +173,6 @@ function getQueryStringArgs (url) {
     return args;
 }
 
-const pt = {
-  cookie: {
-    get: function(t) {
-      var e, i = function(t) {
-        if (!t)
-          return t;
-        for (; t != unescape(t); )
-          t = unescape(t);
-        for (var e = ["<", ">", "'", '"', "%3c", "%3e", "%27", "%22", "%253c", "%253e", "%2527", "%2522"], i = ["<", ">", "'", '"', "%26%23x3c%3B", "%26%23x3e%3B", "%26%23x27%3B", "%26%23x22%3B", "%2526%2523x3c%253B", "%2526%2523x3e%253B", "%2526%2523x27%253B", "%2526%2523x22%253B"], n = 0; n < e.length; n++)
-          t = t.replace(new RegExp(e[n],"gi"), i[n]);
-        return t;
-      };
-      return i(unescape(t));
-    }
-  },
-  hash33: function(t) {
-    for (var e = 0, i = 0, n = t.length; n > i; ++i)
-      e += (e << 5) + t.charCodeAt(i);
-    return 2147483647 & e;
-  }
-};
 
 
 function login(callback) {
@@ -301,6 +245,16 @@ function login2(callback) {
   req.end();
 }
 
+function initial(callback) {
+  Promise.all([
+    new Promise((resolve, reject) => getFriends(() => resolve())),
+    new Promise((resolve, reject) => getGroups(() => resolve())),
+    new Promise((resolve, reject) => getDiscuss(() => resolve()))
+  ]).then(() => {
+    if (callback) callback();
+  });
+}
+
 function getFriends(callback) {
   let data = util.format('r={"vfwebqq":"%s","hash":"%s"}', loginInfo.vfwebqq, hash2(loginInfo.uin, ''));
   data = encodeURI(data);
@@ -323,6 +277,49 @@ function getFriends(callback) {
   req.end(data);
 }
 
+function getGroups(callback) {
+  let data = util.format('r={"vfwebqq":"%s","hash":"%s"}', loginInfo.vfwebqq, hash2(loginInfo.uin, ''));
+  data = encodeURI(data);
+  let req = http.request(new Option({
+    'method': 'POST',
+    'hostname': 's.web2.qq.com',
+    'path': '/api/get_group_name_list_mask2',
+    'headers': {
+      'referer': 'http://s.web2.qq.com/proxy.html?v=20130916001&callback=1&id=1',
+      'origin': 'http://s.web2.qq.com',
+      'connection': 'keep-alive',
+      'content-type': 'application/x-www-form-urlencoded',
+      'content-length': data.length,
+    }
+  }), reciver((res, buffer) => {
+    let data = JSON.parse(res.data);
+    friends = parseGroupData(data.result);
+    if (callback) callback();
+  }));
+  req.end(data);
+}
+
+function getDiscuss() {
+  let data = util.format('r={"vfwebqq":"%s","hash":"%s"}', loginInfo.vfwebqq, hash2(loginInfo.uin, ''));
+  data = encodeURI(data);
+  let req = http.request(new Option({
+    'method': 'GET',
+    'hostname': 's.web2.qq.com',
+    'path': '/api/get_discus_list?clientid=53999199&psessionid=' + loginInfo.psessionid + '&vfwebqq=' + loginInfo.vfwebqq + '&t=' + Date.now(),
+    'headers': {
+      'referer': 'http://s.web2.qq.com/proxy.html?v=20130916001&callback=1&id=1',
+      'origin': 'http://s.web2.qq.com',
+      'connection': 'keep-alive',
+      'content-type': 'utf-8',
+    }
+  }), reciver((res, buffer) => {
+    let data = JSON.parse(res.data);
+    friends = parseDiscussData(data.result);
+    if (callback) callback();
+  }));
+  req.end(data);
+}
+
 function parseFriendsData({categories, friends: fris, info, marknames, vipinfo}) {
   categories.forEach((catg, index, array) => (friendsCategories[catg.sort] = catg));
   fris.forEach((friend, index, array) => (friends[friend.uin] = friend));
@@ -330,8 +327,17 @@ function parseFriendsData({categories, friends: fris, info, marknames, vipinfo})
   marknames.forEach((markname, index, array) => friends[markname.uin].markname = markname.markname);
 }
 
+function parseGroupData({gnamelist}) {
+  gnamelist.forEach((group, index, array) => groups[group.gid] = group);
+}
+
+function parseDiscussData({dnamelist}) {
+  dnamelist.forEach((discuss, index, array) => discusList[discuss.did] = discuss);
+}
+
+// 以下代码复制或修改自 WebQQ 前端代码
 /* jshint ignore:start */
-hash2 = function(uin,ptvfwebqq){
+var hash2 = function(uin,ptvfwebqq){
     uin += "";
     var ptb = [];
     for (var i=0;i<ptvfwebqq.length;i++){
@@ -364,6 +370,60 @@ var byte2hex = function(bytes){//bytes array
     }
     return buf;
 }
+
+const pt = {
+  cookie: {
+    get: function(t) {
+      var e, i = function(t) {
+        if (!t)
+          return t;
+        for (; t != unescape(t); )
+          t = unescape(t);
+        for (var e = ["<", ">", "'", '"', "%3c", "%3e", "%27", "%22", "%253c", "%253e", "%2527", "%2522"], i = ["<", ">", "'", '"', "%26%23x3c%3B", "%26%23x3e%3B", "%26%23x27%3B", "%26%23x22%3B", "%2526%2523x3c%253B", "%2526%2523x3e%253B", "%2526%2523x27%253B", "%2526%2523x22%253B"], n = 0; n < e.length; n++)
+          t = t.replace(new RegExp(e[n],"gi"), i[n]);
+        return t;
+      };
+      return i(unescape(t));
+    }
+  },
+  hash33: function(t) {
+    for (var e = 0, i = 0, n = t.length; n > i; ++i)
+      e += (e << 5) + t.charCodeAt(i);
+    return 2147483647 & e;
+  }
+};
+
+function r(c) {
+	return (c || "") + Math.round(2147483647 * (Math.random() || .5)) * +new Date % 1E10
+}
+
+CookieCan.push({
+  'key': 'pgv_pvi',
+  'value': r(),
+  'path': '/',
+  'domain': 'qq.com'
+});
+
+CookieCan.push({
+  'key': 'pgv_si',
+  'value': r('s'),
+  'path': '/',
+  'domain': 'qq.com'
+});
+
+CookieCan.push({
+  'key': 'ptisp',
+  'value': 'cnc',
+  'path': '/',
+  'domain': 'qq.com'
+});
+
+CookieCan.push({
+  'key': 'RK',
+  'value': 'jcnicGbKPg',
+  'path': '/',
+  'domain': 'qq.com'
+});
 /* jshint ignore:end */
 
 exports.login = login;
