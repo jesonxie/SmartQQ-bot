@@ -2,22 +2,356 @@ const http = require('http');
 const zlib = require('zlib');
 const fs = require('fs');
 const util = require('util');
+const EventEmitter = require('events');
 
-// 登录状态
-let logined = false;
-let loginInfo = {};
-let friends = {};
-let friendsCategories = [];
-let groups = {};
-let groupCategories = [];
-let discusList = {};
+class QQ extends EventEmitter{
+  constructor() {
+    super();
+    this.CookieCan = [];
+    this.logined = false;
+    this.loginInfo = {};
+    this.pollQueue = [];
+    this.friends = {};
+    this.friendsCategories = [];
+    this.unknownFriends = {};
+    this.groups = {};
+    this.groupCategories = [];
+    this.discusList = {};
 
+    this.on('__grpMsg__', (message) => {
+      message.from = groups[message.from_uin];
+      message.send = friends[message.send_uin];
+      if (!message.send) message.send = unknownFriends[message.send_uin];
+      message.to = friends[message.to_uin];
+      this.emit('group_message', message);
+    });
+
+    this.on('___dicMsg__', (message) => {
+      message.from = friends[message.from_uin];
+      message.to = friends[message.to_uin];
+      this.emit('discuss_message', message);
+    });
+
+    this.on('__msg__', (message) => {
+      message.from = friends[message.from_uin];
+      message.to = friends[message.to_uin];
+      this.emit('message', message);
+    });
+
+    this.CookieCan.push({
+      'key': 'pgv_pvi',
+      'value': r(),
+      'path': '/',
+      'domain': 'qq.com'
+    });
+
+    this.CookieCan.push({
+      'key': 'pgv_si',
+      'value': r('s'),
+      'path': '/',
+      'domain': 'qq.com'
+    });
+
+    this.CookieCan.push({
+      'key': 'ptisp',
+      'value': 'cnc',
+      'path': '/',
+      'domain': 'qq.com'
+    });
+
+    this.CookieCan.push({
+      'key': 'RK',
+      'value': 'jcnicGbKPg',
+      'path': '/',
+      'domain': 'qq.com'
+    });
+  }
+  // 获取二维码
+  getQrcode(callback) {
+    let req = http.request(new Option(this, {
+      'method': 'GET',
+      'hostname': 'ssl.ptlogin2.qq.com',
+      'path': '/ptqrshow?appid=501004106&e=2&l=M&s=3&d=72&v=4&t=' + Math.random() + '&daid=164&pt_3rd_aid=0',
+    }), reciver(this, (res, buffer) => {
+      this.confirmQRCodeState(callback);
+      return fs.writeFile('qrcode.png', buffer, (err) => {
+        if(err) return console.log(err);
+        console.log('QRcode refresh');
+      });
+    }));
+
+    req.end();
+  }
+
+  // 确认二维码状态
+  confirmQRCodeState(callback) {
+    let qrsig = this.CookieCan.qrsig;
+    if (!qrsig) {
+      for (let i = this.CookieCan.length - 1; i >= 0; i--) {
+        if (this.CookieCan[i].key == 'qrsig') {
+          qrsig = this.CookieCan[i].value;
+        }
+      }
+    }
+    let req = http.request(new Option(this, {
+      'method': 'GET',
+      'hostname': 'ssl.ptlogin2.qq.com',
+      'path': '/ptqrlogin?u1=http%3A%2F%2Fw.qq.com%2Fproxy.html&ptqrtoken=' + pt.hash33(pt.cookie.get(qrsig)) +
+      '&ptredirect=0&h=1&t=1&g=1&from_ui=1&ptlang=2052&action=0-0-' + Date.now() + '&js_ver=10230&js_type=1&login_sig=&pt_uistyle=40&aid=501004106&daid=164&mibao_css=m_webqq&',
+    }), reciver(this, (res, buffer) => {
+      console.log(res.data);
+      let state, url, describe, nickName;
+      let result = /^ptuiCB\('(.*?)',\s*'(.*?)',\s*'(.*?)',\s*'(.*?)',\s*'(.*?)',\s*'(.*?)'\)/.exec(res.data);
+      if (result) [, state, , url, , describe, nickName] = result;
+      state = parseInt(state);
+      if (state == 65) {
+        this.getQrcode();
+        return console.log(describe);
+      }
+      if (state == 0) {
+        this.logined = true;
+        console.log(describe);
+        this.loginInfo = getQueryStringArgs(url);
+        this.loginInfo.nickName = nickName;
+        return callback ? callback(url) : undefined;
+      }
+      setTimeout(() => this.confirmQRCodeState(callback), 1000);
+    }));
+
+    req.end();
+  }
+
+  // 登录
+  login(callback) {
+    new Promise((resolve, reject) => this.getQrcode(url => resolve(url)))
+    .then((url) => new Promise((resolve, reject) => this.getPtwebqq(url, () => resolve())))
+    .then(() => Promise.all([
+      new Promise((resolve, reject) => this.getVfwebqq(() => resolve())),
+      new Promise((resolve, reject) => this.login2(() => resolve())),
+    ]))
+    .then(() => {
+      if (callback) callback();
+    });
+  }
+
+  // 获取一系列登录相关 cookie
+  getPtwebqq(url, callback) {
+    let index = url.lastIndexOf('/');
+    let path = url.slice(index);
+    let req = http.request(new Option(this, {
+      'method': 'GET',
+      'hostname': 'ptlogin2.web2.qq.com',
+      'path': path,
+      'headers': {
+        'upgrade-insecure-requests': '1',
+      }
+    }), reciver(this, (res, buffer) => {
+      if (callback) callback();
+    }));
+
+    req.end();
+  }
+
+  // 获取 vfwebqq
+  getVfwebqq(callback) {
+    let req = http.request(new Option(this, {
+      'method': 'GET',
+      'hostname': 's.web2.qq.com',
+      'content-type': 'utf-8',
+      'path': '/api/getvfwebqq?ptwebqq=&clientid=53999199&psessionid=&t=' + Date.now(),
+      'headers': {
+        'referer': 'http://s.web2.qq.com/proxy.html?v=20130916001&callback=1&id=1',
+        'connection': 'keep-alive'
+      }
+    }), reciver(this, (res, buffer) => {
+      let data = JSON.parse(res.data);
+      this.loginInfo.vfwebqq = data.result.vfwebqq;
+      if (callback) callback();
+    }));
+
+    req.end();
+  }
+
+  login2(callback) {
+    let data = encodeURI('r={"ptwebqq":"","clientid":53999199,"psessionid":"","status":"online"}');
+    let req = http.request(new Option(this, {
+      'method': 'POST',
+      'hostname': 'd1.web2.qq.com',
+      'path': '/channel/login2',
+      'content-type': 'application/x-www-form-urlencoded',
+      'headers': {
+        'Origin': 'http://d1.web2.qq.com',
+        'Referer': 'http://d1.web2.qq.com/proxy.html?v=20151105001&callback=1&id=2',
+          'Content-Length': data.length
+      }
+    }), reciver(this, (res, buffer) => {
+      let data = JSON.parse(res.data);
+      let uin = data.result.uin;
+      this.loginInfo.uin = uin;
+      this.friends[uin] = {
+        'uin': uin,
+        'markname': '我',
+        'isSelf': 'true',
+        'nick': this.loginInfo.nickName
+      };
+      this.loginInfo.psessionid = data.result.psessionid;
+      console.log(data);
+      if (callback) callback();
+    }));
+
+    req.end(data);
+  }
+
+  // 轮询获取消息并保持登录状态
+  poll() {
+    let data = util.format('r={"ptwebqq":"","clientid":53999199,"psessionid":"' + this.loginInfo.psessionid + '","key":""}');
+    data = encodeURI(data);
+    let time = Date.now();
+    let req = http.request(new Option(this, {
+      'method': 'POST',
+      'hostname': 'd1.web2.qq.com',
+      'headers': {
+        'Referer': 'http://d1.web2.qq.com/proxy.html?v=20151105001&callback=1&id=2',
+        'Origin': 'http://d1.web2.qq.com',
+        'Connection': 'keep-alive',
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Content-Length': data.length
+      }
+    }), reciver(this, (res, buffer) => {
+      let data;
+      if (res.data) {
+        data = JSON.parse(res.data).result;
+        if (Object.prototype.toString.call(data) == '[object Array]') this.reciveMessage(data);
+      }
+      if (pollQueue[0] == time) {
+        this.pollQueue.shift();
+        return setTimeout(() => {
+          this.poll();
+        }, 0);
+      }
+    }));
+
+    req.end(data);
+  }
+
+  initial(callback) {
+    Promise.all([
+      new Promise((resolve, reject) => this.getFriends(() => resolve())),
+      new Promise((resolve, reject) => this.getGroups(() => resolve())),
+      new Promise((resolve, reject) => this.getDiscuss(() => resolve()))
+    ]).then(() => {
+      if (callback) callback();
+    });
+  }
+
+  getFriends(callback) {
+    let data = util.format('r={"vfwebqq":"%s","hash":"%s"}', this.loginInfo.vfwebqq, hash2(this.loginInfo.uin, ''));
+    data = encodeURI(data);
+    let req = http.request(new Option(this, {
+      'method': 'POST',
+      'hostname': 's.web2.qq.com',
+      'path': '/api/get_user_friends2',
+      'headers': {
+        'referer': 'http://s.web2.qq.com/proxy.html?v=20130916001&callback=1&id=1',
+        'origin': 'http://s.web2.qq.com',
+        'connection': 'keep-alive',
+        'content-type': 'application/x-www-form-urlencoded',
+        'content-length': data.length,
+      }
+    }), reciver(this, (res, buffer) => {
+      let data = JSON.parse(res.data);
+      this.parseFriendsData(data.result);
+      if (callback) callback();
+    }));
+    req.end(data);
+  }
+
+  getGroups(callback) {
+    let data = util.format('r={"vfwebqq":"%s","hash":"%s"}', this.loginInfo.vfwebqq, hash2(this.loginInfo.uin, ''));
+    data = encodeURI(data);
+    let req = http.request(new Option(this, {
+      'method': 'POST',
+      'hostname': 's.web2.qq.com',
+      'path': '/api/get_group_name_list_mask2',
+      'headers': {
+        'referer': 'http://s.web2.qq.com/proxy.html?v=20130916001&callback=1&id=1',
+        'origin': 'http://s.web2.qq.com',
+        'connection': 'keep-alive',
+        'content-type': 'application/x-www-form-urlencoded',
+        'content-length': data.length,
+      }
+    }), reciver(this, (res, buffer) => {
+      let data = JSON.parse(res.data);
+      this.parseGroupData(data.result);
+      if (callback) callback();
+    }));
+    req.end(data);
+  }
+
+  getDiscuss(callback) {
+    let data = util.format('r={"vfwebqq":"%s","hash":"%s"}', this.loginInfo.vfwebqq, hash2(this.loginInfo.uin, ''));
+    data = encodeURI(data);
+    let req = http.request(new Option(this, {
+      'method': 'GET',
+      'hostname': 's.web2.qq.com',
+      'path': '/api/get_discus_list?clientid=53999199&psessionid=' + this.loginInfo.psessionid + '&vfwebqq=' + this.loginInfo.vfwebqq + '&t=' + Date.now(),
+      'headers': {
+        'referer': 'http://s.web2.qq.com/proxy.html?v=20130916001&callback=1&id=1',
+        'origin': 'http://s.web2.qq.com',
+        'connection': 'keep-alive',
+        'content-type': 'utf-8',
+      }
+    }), reciver(this, (res, buffer) => {
+      let data = JSON.parse(res.data);
+      this.parseDiscussData(data.result);
+      if (callback) callback();
+    }));
+    req.end(data);
+  }
+
+  parseFriendsData({categories, friends: fris, info, marknames, vipinfo}) {
+    categories.forEach((catg, index, array) => (this.friendsCategories[catg.sort] = catg));
+    fris.forEach((friend, index, array) => (this.friends[friend.uin] = friend));
+    info.forEach((infor, index, array) => Object.assign(this.friends[infor.uin], infor));
+    marknames.forEach((markname, index, array) => this.friends[markname.uin].markname = markname.markname);
+  }
+
+  parseGroupData({gnamelist}) {
+    gnamelist.forEach((group, index, array) => this.groups[group.gid] = group);
+  }
+
+  parseDiscussData({dnamelist}) {
+    dnamelist.forEach((discuss, index, array) => this.discusList[discuss.did] = discuss);
+  }
+
+  reciveMessage(data) {
+    data.forEach((message, index, array) => {
+      switch (message.poll_type) {
+        case 'group_message':
+          this.emit('__grpMsg__', message);
+          break;
+        case 'dicuss_message':
+          this.emit('___dicMsg__', message);
+          break;
+        case 'message':
+          this.emit('__msg__', message);
+          break;
+      }
+    });
+  }
+
+  sendMessage(tid, type, message, {color = '000000', name = '微软雅黑', size = '10', style = '[0, 0, 0]'}) {
+
+  }
+}
+
+// 公用函数
 class Option {
-  constructor(obj) {
+  constructor(context, obj) {
     if(!obj.headers) obj.headers = {};
     Object.assign(obj.headers, basicHeaders);
     let cookies = {};
-    CookieCan.forEach(({key, value, path, domain}, index, CookieCan) => {
+    context.CookieCan.forEach(({key, value, path, domain}, index, CookieCan) => {
       if(obj.hostname.indexOf(domain.replace('*', '')) != -1 &&
       obj.path.indexOf(path) != -1) {
         if (cookies[key] && cookies[key].domain.length > domain.length) return;
@@ -41,10 +375,8 @@ const basicHeaders = {
   'Accept-Language': 'zh-TW,zh;q=0.8,en-US;q=0.6,en;q=0.4,zh-CN;q=0.2',
 };
 
-const CookieCan = [];
-
 // 对响应做基本的处理
-let reciver = (callback) => (res) => {
+let reciver = (context, callback) => (res) => {
   let setCookies = res.headers['set-cookie'];
   // set cookie
   if (setCookies) {
@@ -68,7 +400,7 @@ let reciver = (callback) => (res) => {
       }
       if (!result.domain) result.domain = res.client._host;
       if (!result.path) result.path = '/';
-      CookieCan.push(result);
+      context.CookieCan.push(result);
     }
   }
 
@@ -96,59 +428,6 @@ let reciver = (callback) => (res) => {
   });
 };
 
-// 获取二维码
-function getQrcode(callback) {
-  let req = http.request(new Option({
-    'method': 'GET',
-    'hostname': 'ssl.ptlogin2.qq.com',
-    'path': '/ptqrshow?appid=501004106&e=2&l=M&s=3&d=72&v=4&t=' + Math.random() + '&daid=164&pt_3rd_aid=0',
-  }), reciver((res, buffer) => {
-    confirmQRCodeState(callback);
-    return fs.writeFile('qrcode.png', buffer, (err) => {
-      if(err) return console.log(err);
-      console.log('QRcode refresh');
-    });
-  }));
-
-  req.end();
-}
-
-function confirmQRCodeState(callback) {
-  let qrsig = CookieCan.qrsig;
-  if (!qrsig) {
-    for (let i = CookieCan.length - 1; i >= 0; i--) {
-      if (CookieCan[i].key == 'qrsig') {
-        qrsig = CookieCan[i].value;
-      }
-    }
-  }
-  let req = http.request(new Option({
-    'method': 'GET',
-    'hostname': 'ssl.ptlogin2.qq.com',
-    'path': '/ptqrlogin?u1=http%3A%2F%2Fw.qq.com%2Fproxy.html&ptqrtoken=' + pt.hash33(pt.cookie.get(qrsig)) +
-    '&ptredirect=0&h=1&t=1&g=1&from_ui=1&ptlang=2052&action=0-0-' + Date.now() + '&js_ver=10230&js_type=1&login_sig=&pt_uistyle=40&aid=501004106&daid=164&mibao_css=m_webqq&',
-  }), reciver((res, buffer) => {
-    console.log(res.data);
-    let state, url, describe, nickName;
-    let result = /^ptuiCB\('(.*?)',\s*'(.*?)',\s*'(.*?)',\s*'(.*?)',\s*'(.*?)',\s*'(.*?)'\)/.exec(res.data);
-    if (result) [, state, , url, , describe, nickName] = result;
-    state = parseInt(state);
-    if (state == 65) {
-      getQrcode();
-      return console.log(describe);
-    }
-    if (state == 0) {
-      logined = true;
-      console.log(describe);
-      loginInfo = getQueryStringArgs(url);
-      return callback ? callback(url) : undefined;
-    }
-    setTimeout(() => confirmQRCodeState(callback), 1000);
-  }));
-
-  req.end();
-}
-
 function getQueryStringArgs (url) {
     let index = url.indexOf('?');
     if (!index) return;
@@ -171,168 +450,6 @@ function getQueryStringArgs (url) {
         }
     }
     return args;
-}
-
-
-
-function login(callback) {
-  new Promise((resolve, reject) => getQrcode(url => resolve(url)))
-  .then((url) => new Promise((resolve, reject) => getPtwebqq(url, () => resolve())))
-  .then(() => Promise.all([
-    new Promise((resolve, reject) => getVfwebqq(() => resolve())),
-    new Promise((resolve, reject) => login2(() => resolve())),
-  ]))
-  .then(() => {
-    if (callback) callback();
-  });
-}
-
-function getPtwebqq(url, callback) {
-  let index = url.lastIndexOf('/');
-  let path = url.slice(index);
-  let req = http.request(new Option({
-    'method': 'GET',
-    'hostname': 'ptlogin2.web2.qq.com',
-    'path': path,
-    'headers': {
-      'upgrade-insecure-requests': '1',
-    }
-  }), reciver((res, buffer) => {
-    if (callback) callback();
-  }));
-
-  req.end();
-}
-
-function getVfwebqq(callback) {
-  let req = http.request(new Option({
-    'method': 'GET',
-    'hostname': 's.web2.qq.com',
-    'content-type': 'utf-8',
-    'path': '/api/getvfwebqq?ptwebqq=&clientid=53999199&psessionid=&t=' + Date.now(),
-    'headers': {
-      'referer': 'http://s.web2.qq.com/proxy.html?v=20130916001&callback=1&id=1',
-      'connection': 'keep-alive'
-    }
-  }), reciver((res, buffer) => {
-    let data = JSON.parse(res.data);
-    loginInfo.vfwebqq = data.result.vfwebqq;
-    if (callback) callback();
-  }));
-
-  req.end();
-}
-
-function login2(callback) {
-  let req = http.request(new Option({
-    'method': 'POST',
-    'hostname': 'd1.web2.qq.com',
-    'path': '/channel/login2',
-    'content-type': 'application/x-www-form-urlencoded',
-    'headers': {
-      'Origin': 'http://d1.web2.qq.com',
-      'Referer': 'http://d1.web2.qq.com/proxy.html?v=20151105001&callback=1&id=2'
-    }
-  }), reciver((res, buffer) => {
-    let data = JSON.parse(res.data);
-    loginInfo.uin = data.result.uin;
-    loginInfo.psessionid = data.result.psessionid;
-    console.log(data);
-    if (callback) callback();
-  }));
-
-  req.write('r=%7B%22ptwebqq%22%3A%22%22%2C%22clientid%22%3A53999199%2C%22psessionid%22%3A%22%22%2C%22status%22%3A%22online%22%7D');
-  req.end();
-}
-
-function initial(callback) {
-  Promise.all([
-    new Promise((resolve, reject) => getFriends(() => resolve())),
-    new Promise((resolve, reject) => getGroups(() => resolve())),
-    new Promise((resolve, reject) => getDiscuss(() => resolve()))
-  ]).then(() => {
-    if (callback) callback();
-  });
-}
-
-function getFriends(callback) {
-  let data = util.format('r={"vfwebqq":"%s","hash":"%s"}', loginInfo.vfwebqq, hash2(loginInfo.uin, ''));
-  data = encodeURI(data);
-  let req = http.request(new Option({
-    'method': 'POST',
-    'hostname': 's.web2.qq.com',
-    'path': '/api/get_user_friends2',
-    'headers': {
-      'referer': 'http://s.web2.qq.com/proxy.html?v=20130916001&callback=1&id=1',
-      'origin': 'http://s.web2.qq.com',
-      'connection': 'keep-alive',
-      'content-type': 'application/x-www-form-urlencoded',
-      'content-length': data.length,
-    }
-  }), reciver((res, buffer) => {
-    let data = JSON.parse(res.data);
-    friends = parseFriendsData(data.result);
-    if (callback) callback();
-  }));
-  req.end(data);
-}
-
-function getGroups(callback) {
-  let data = util.format('r={"vfwebqq":"%s","hash":"%s"}', loginInfo.vfwebqq, hash2(loginInfo.uin, ''));
-  data = encodeURI(data);
-  let req = http.request(new Option({
-    'method': 'POST',
-    'hostname': 's.web2.qq.com',
-    'path': '/api/get_group_name_list_mask2',
-    'headers': {
-      'referer': 'http://s.web2.qq.com/proxy.html?v=20130916001&callback=1&id=1',
-      'origin': 'http://s.web2.qq.com',
-      'connection': 'keep-alive',
-      'content-type': 'application/x-www-form-urlencoded',
-      'content-length': data.length,
-    }
-  }), reciver((res, buffer) => {
-    let data = JSON.parse(res.data);
-    friends = parseGroupData(data.result);
-    if (callback) callback();
-  }));
-  req.end(data);
-}
-
-function getDiscuss() {
-  let data = util.format('r={"vfwebqq":"%s","hash":"%s"}', loginInfo.vfwebqq, hash2(loginInfo.uin, ''));
-  data = encodeURI(data);
-  let req = http.request(new Option({
-    'method': 'GET',
-    'hostname': 's.web2.qq.com',
-    'path': '/api/get_discus_list?clientid=53999199&psessionid=' + loginInfo.psessionid + '&vfwebqq=' + loginInfo.vfwebqq + '&t=' + Date.now(),
-    'headers': {
-      'referer': 'http://s.web2.qq.com/proxy.html?v=20130916001&callback=1&id=1',
-      'origin': 'http://s.web2.qq.com',
-      'connection': 'keep-alive',
-      'content-type': 'utf-8',
-    }
-  }), reciver((res, buffer) => {
-    let data = JSON.parse(res.data);
-    friends = parseDiscussData(data.result);
-    if (callback) callback();
-  }));
-  req.end(data);
-}
-
-function parseFriendsData({categories, friends: fris, info, marknames, vipinfo}) {
-  categories.forEach((catg, index, array) => (friendsCategories[catg.sort] = catg));
-  fris.forEach((friend, index, array) => (friends[friend.uin] = friend));
-  info.forEach((infor, index, array) => Object.assign(friends[infor.uin], infor));
-  marknames.forEach((markname, index, array) => friends[markname.uin].markname = markname.markname);
-}
-
-function parseGroupData({gnamelist}) {
-  gnamelist.forEach((group, index, array) => groups[group.gid] = group);
-}
-
-function parseDiscussData({dnamelist}) {
-  dnamelist.forEach((discuss, index, array) => discusList[discuss.did] = discuss);
 }
 
 // 以下代码复制或修改自 WebQQ 前端代码
@@ -379,7 +496,9 @@ const pt = {
           return t;
         for (; t != unescape(t); )
           t = unescape(t);
-        for (var e = ["<", ">", "'", '"', "%3c", "%3e", "%27", "%22", "%253c", "%253e", "%2527", "%2522"], i = ["<", ">", "'", '"', "%26%23x3c%3B", "%26%23x3e%3B", "%26%23x27%3B", "%26%23x22%3B", "%2526%2523x3c%253B", "%2526%2523x3e%253B", "%2526%2523x27%253B", "%2526%2523x22%253B"], n = 0; n < e.length; n++)
+        for (var e = ["<", ">", "'", '"', "%3c", "%3e", "%27", "%22", "%253c", "%253e", "%2527", "%2522"],
+                 i = ["<", ">", "'", '"', "%26%23x3c%3B", "%26%23x3e%3B", "%26%23x27%3B", "%26%23x22%3B", "%2526%2523x3c%253B", "%2526%2523x3e%253B", "%2526%2523x27%253B", "%2526%2523x22%253B"],
+                 n = 0; n < e.length; n++)
           t = t.replace(new RegExp(e[n],"gi"), i[n]);
         return t;
       };
@@ -397,44 +516,5 @@ function r(c) {
 	return (c || "") + Math.round(2147483647 * (Math.random() || .5)) * +new Date % 1E10
 }
 
-CookieCan.push({
-  'key': 'pgv_pvi',
-  'value': r(),
-  'path': '/',
-  'domain': 'qq.com'
-});
-
-CookieCan.push({
-  'key': 'pgv_si',
-  'value': r('s'),
-  'path': '/',
-  'domain': 'qq.com'
-});
-
-CookieCan.push({
-  'key': 'ptisp',
-  'value': 'cnc',
-  'path': '/',
-  'domain': 'qq.com'
-});
-
-CookieCan.push({
-  'key': 'RK',
-  'value': 'jcnicGbKPg',
-  'path': '/',
-  'domain': 'qq.com'
-});
 /* jshint ignore:end */
-
-exports.login = login;
-Object.defineProperty(exports, 'logined', {
-  get: () => logined
-});
-Object.defineProperty(exports, 'loginInfo', {
-  get: () => loginInfo
-});
-exports.getFriends = getFriends;
-exports.friends = friends;
-exports.friendsCategories = friendsCategories;
-exports.groupCategories = groupCategories;
-exports.groups = groups;
+exports.new = () => new QQ();

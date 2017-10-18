@@ -1,5 +1,6 @@
 const qq = require('./qq');
 
-qq.login(() => {
-  qq.initial();
+let bot = qq.new();
+bot.login(() => {
+  bot.initial();
 });
