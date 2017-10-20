@@ -7,36 +7,16 @@ const EventEmitter = require('events');
 class QQ extends EventEmitter{
   constructor() {
     super();
-    this.CookieCan = [];
-    this.logined = false;
-    this.loginInfo = {};
-    this.pollQueue = [];
-    this.friends = {};
-    this.friendsCategories = [];
-    this.unknownFriends = {};
-    this.groups = {};
-    this.groupCategories = [];
-    this.discusList = {};
-
-    this.on('__grpMsg__', (message) => {
-      message.from = groups[message.from_uin];
-      message.send = friends[message.send_uin];
-      if (!message.send) message.send = unknownFriends[message.send_uin];
-      message.to = friends[message.to_uin];
-      this.emit('group_message', message);
-    });
-
-    this.on('___dicMsg__', (message) => {
-      message.from = friends[message.from_uin];
-      message.to = friends[message.to_uin];
-      this.emit('discuss_message', message);
-    });
-
-    this.on('__msg__', (message) => {
-      message.from = friends[message.from_uin];
-      message.to = friends[message.to_uin];
-      this.emit('message', message);
-    });
+    this.CookieCan = [];          // Cookie 罐
+    this.logined = false;         // 登录状态
+    this.loginInfo = {};          // 登录信息
+    this.pollTime = 0;          // 心跳包队列
+    this.friends = {};            // 好友列表
+    this.friendsCategories = [];  // 好友分组
+    this.groups = {};             // 群列表
+    this.groupCategories = [];    // 群分组
+    this.discusList = {};         // 讨论组列表
+    this.recentList = [];         // 最近会话
 
     this.CookieCan.push({
       'key': 'pgv_pvi',
@@ -99,7 +79,6 @@ class QQ extends EventEmitter{
       'path': '/ptqrlogin?u1=http%3A%2F%2Fw.qq.com%2Fproxy.html&ptqrtoken=' + pt.hash33(pt.cookie.get(qrsig)) +
       '&ptredirect=0&h=1&t=1&g=1&from_ui=1&ptlang=2052&action=0-0-' + Date.now() + '&js_ver=10230&js_type=1&login_sig=&pt_uistyle=40&aid=501004106&daid=164&mibao_css=m_webqq&',
     }), reciver(this, (res, buffer) => {
-      console.log(res.data);
       let state, url, describe, nickName;
       let result = /^ptuiCB\('(.*?)',\s*'(.*?)',\s*'(.*?)',\s*'(.*?)',\s*'(.*?)',\s*'(.*?)'\)/.exec(res.data);
       if (result) [, state, , url, , describe, nickName] = result;
@@ -130,6 +109,7 @@ class QQ extends EventEmitter{
       new Promise((resolve, reject) => this.login2(() => resolve())),
     ]))
     .then(() => {
+      this.poll();
       if (callback) callback();
     });
   }
@@ -207,9 +187,11 @@ class QQ extends EventEmitter{
     let data = util.format('r={"ptwebqq":"","clientid":53999199,"psessionid":"' + this.loginInfo.psessionid + '","key":""}');
     data = encodeURI(data);
     let time = Date.now();
+    this.pollTime = time;
     let req = http.request(new Option(this, {
       'method': 'POST',
       'hostname': 'd1.web2.qq.com',
+      'path': '/channel/poll2',
       'headers': {
         'Referer': 'http://d1.web2.qq.com/proxy.html?v=20151105001&callback=1&id=2',
         'Origin': 'http://d1.web2.qq.com',
@@ -220,11 +202,10 @@ class QQ extends EventEmitter{
     }), reciver(this, (res, buffer) => {
       let data;
       if (res.data) {
-        data = JSON.parse(res.data).result;
-        if (Object.prototype.toString.call(data) == '[object Array]') this.reciveMessage(data);
+        data = JSON.parse(res.data.replace(/(\n)|(\r)/im, (s, n) => n ? '\\n' : '\\r')).result;
+        if (data && data[0]) this.reciveMessage(data);
       }
-      if (pollQueue[0] == time) {
-        this.pollQueue.shift();
+      if (this.pollTime == time) {
         return setTimeout(() => {
           this.poll();
         }, 0);
@@ -239,8 +220,12 @@ class QQ extends EventEmitter{
       new Promise((resolve, reject) => this.getFriends(() => resolve())),
       new Promise((resolve, reject) => this.getGroups(() => resolve())),
       new Promise((resolve, reject) => this.getDiscuss(() => resolve()))
-    ]).then(() => {
+    ])
+    .then(() => new Promise((resolve, reject) => this.getRecentList(() => resolve)))
+    .then(() => {
       if (callback) callback();
+    }, (e) => {
+      console.log(e);
     });
   }
 
@@ -289,8 +274,6 @@ class QQ extends EventEmitter{
   }
 
   getDiscuss(callback) {
-    let data = util.format('r={"vfwebqq":"%s","hash":"%s"}', this.loginInfo.vfwebqq, hash2(this.loginInfo.uin, ''));
-    data = encodeURI(data);
     let req = http.request(new Option(this, {
       'method': 'GET',
       'hostname': 's.web2.qq.com',
@@ -305,6 +288,85 @@ class QQ extends EventEmitter{
       let data = JSON.parse(res.data);
       this.parseDiscussData(data.result);
       if (callback) callback();
+    }));
+    req.end();
+  }
+
+  getGroupInfo(gid, callback) {
+    let req = http.request(new Option(this, {
+      'method': 'GET',
+      'hostname': 's.web2.qq.com',
+      'path': '/api/get_group_info_ext2?gcode=' + gid + '&vfwebqq=' + this.loginInfo.vfwebqq + '&t=' + Date.now(),
+      'headers': {
+        'Referer': 'http://d1.web2.qq.com/proxy.html?v=20151105001&callback=1&id=2',
+        'Content-Type': 'utf-8',
+        'Connection': 'keep-alive',
+        'Content-Length': data.length
+      }
+    }), reciver(this, (res, buffer) => {
+      let data = JSON.parse(res.data.replace(/(\n)|(\r)/im, (s, n) => n ? '\\n' : '\\r')).result;
+      let group = this.groups[gid];
+      Object.assign(group, data.ginfo);
+      group.member = {};
+      data.minfo.forEach((member, index, array) => {
+        group.member[member.uin] = member;
+      });
+      data.cards.forEach(({id, card}, index, array) => {
+        group.member[id].card = card;
+      });
+    }));
+    req.end();
+  }
+
+  getDiscussInfo(did, callback) {
+    let req = http.request(new Option(this, {
+      'method': 'GET',
+      'hostname': 's.web2.qq.com',
+      'path': '/channel/get_discu_info?did=' + did + '&vfwebqq=' + this.loginInfo.vfwebqq + '&clientid=53999199&psessionid=' + this.loginInfo.psessionid + '&t=' + Date.now(),
+      'headers': {
+        'Referer': 'http://d1.web2.qq.com/proxy.html?v=20151105001&callback=1&id=2',
+        'Content-Type': 'utf-8',
+        'Connection': 'keep-alive',
+        'Content-Length': data.length
+      }
+    }), reciver(this, (res, buffer) => {
+      let data = JSON.parse(res.data.replace(/(\n)|(\r)/im, (s, n) => n ? '\\n' : '\\r')).result;
+      let discuss = this.discusList[did];
+      Object.assign(discuss, data.info);
+      group.member = {};
+      data.mem_info.forEach((member, index, array) => {
+        discuss.member[member.uin] = member;
+        if (this.friends[member.uin]) member.markname = this.friends[member.uin].markname;
+      });
+    }));
+    req.end();
+  }
+
+  getRecentList(callback) {
+    let data = util.format('r={"vfwebqq":"%s","clientid":53999199,"psessionid":"%s"}', this.loginInfo.vfwebqq, this.loginInfo.psessionid);
+    data = encodeURI(data);
+    let req = http.request(new Option(this, {
+      'method': 'POST',
+      'hostname': 'd1.web2.qq.com',
+      'path': '/channel/get_recent_list2',
+      'headers': {
+        'Referer': 'http://d1.web2.qq.com/proxy.html?v=20151105001&callback=1&id=2',
+        'Origin': 'http://d1.web2.qq.com',
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Connection': 'keep-alive',
+        'Content-Length': data.length
+      }
+    }), reciver(this, (res, buffer) => {
+      let data = JSON.parse(res.data).result;
+      data.forEach(({type, uin}, index, array) => {
+        let target;
+        switch (type) {
+          case 0: target = this.friends[uin]; break;
+          case 1: target = this.groups[uin]; break;
+          case 2: target = this.discusList[uin]; break;
+        }
+        this.recentList.push(target);
+      });
     }));
     req.end(data);
   }
@@ -325,16 +387,38 @@ class QQ extends EventEmitter{
   }
 
   reciveMessage(data) {
-    data.forEach((message, index, array) => {
-      switch (message.poll_type) {
+    if (!data) return;
+    data.forEach(({poll_type, value: message}, index, array) => {
+      message.style = message.content[0];
+      message.content = message.content[1];
+      switch (poll_type) {
         case 'group_message':
-          this.emit('__grpMsg__', message);
+          message.from = this.groups[message.from_uin];
+          message.to = this.friends[message.to_uin];
+          if (!message.from.member) {
+            return new Promise((resolve, reject) => this.getGroupInfo(message.from.gid, () => {
+              message.send = message.from.member[message.send_uin];
+              this.emit('group_message', message);
+            }));
+          }
+          message.send = this.groups[message.from_uin].member[message.send_uin];
+          this.emit('group_message', message);
           break;
         case 'dicuss_message':
-          this.emit('___dicMsg__', message);
+          message.from = this.discusList[message.from_uin];
+          message.to = this.friends[message.to_uin];
+          if (!message.from.member) {
+            return new Promise((resolve, reject) => this.getDiscussInfo(message.from.did, () => {
+              message.send = message.from.member[message.send_uin];
+              this.emit('discuss_message', message);
+            }));
+          }
+          this.emit('discuss_message', message);
           break;
         case 'message':
-          this.emit('__msg__', message);
+          message.from = this.friends[message.from_uin];
+          message.to = this.friends[message.to_uin];
+          this.emit('message', message);
           break;
       }
     });
