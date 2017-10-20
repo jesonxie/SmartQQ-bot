@@ -54,7 +54,7 @@ class QQ extends EventEmitter{
       'path': '/ptqrshow?appid=501004106&e=2&l=M&s=3&d=72&v=4&t=' + Math.random() + '&daid=164&pt_3rd_aid=0',
     }), reciver(this, (error, res, buffer) => {
       if (error) return callback(error);
-      this.confirmQRCodeState(null, callback);
+      this.confirmQRCodeState(callback);
       return fs.writeFile('qrcode.png', buffer, (err) => {
         if(err) return console.log(err);
         console.log('QRcode refresh');
@@ -95,7 +95,7 @@ class QQ extends EventEmitter{
         console.log(describe);
         this.loginInfo = getQueryStringArgs(url);
         this.loginInfo.nickName = nickName;
-        return callback(null);
+        return callback(null, url);
       }
       setTimeout(() => this.confirmQRCodeState(callback), 1000);
     }));
@@ -106,11 +106,23 @@ class QQ extends EventEmitter{
 
   // 登录
   login(callback = handle) {
-    new Promise((resolve, reject) => this.getQrcode(url => resolve(url)))
-    .then((url) => new Promise((resolve, reject) => this.getPtwebqq(url, () => resolve())))
+    new Promise((resolve, reject) => this.getQrcode((error, url) => {
+      if (error) return reject(error);
+      resolve(url);
+    }))
+    .then((url) => new Promise((resolve, reject) => this.getPtwebqq(url, (error) => {
+      if (error) return reject(error);
+      resolve();
+    })))
     .then(() => Promise.all([
-      new Promise((resolve, reject) => this.getVfwebqq(() => resolve())),
-      new Promise((resolve, reject) => this.login2(() => resolve())),
+      new Promise((resolve, reject) => this.getVfwebqq((error) => {
+        if (error) return reject(error);
+        resolve();
+      })),
+      new Promise((resolve, reject) => this.login2((error) => {
+        if (error) return reject(error);
+        resolve();
+      }))
     ]))
     .then(() => {
       this.poll();
@@ -227,11 +239,23 @@ class QQ extends EventEmitter{
 
   initial(callback = handle) {
     Promise.all([
-      new Promise((resolve, reject) => this.getFriends(() => resolve())),
-      new Promise((resolve, reject) => this.getGroups(() => resolve())),
-      new Promise((resolve, reject) => this.getDiscuss(() => resolve()))
+      new Promise((resolve, reject) => this.getFriends((error) => {
+        if (error) return reject(error);
+        resolve();
+      })),
+      new Promise((resolve, reject) => this.getGroups((error) => {
+        if (error) return reject(error);
+        resolve();
+      })),
+      new Promise((resolve, reject) => this.getDiscuss((error) => {
+        if (error) return reject(error);
+        resolve();
+      }))
     ])
-    .then(() => new Promise((resolve, reject) => this.getRecentList(() => resolve)))
+    .then(() => new Promise((resolve, reject) => this.getRecentList((error) => {
+      if (error) return reject(error);
+      resolve();
+    })))
     .then(() => {
       callback();
     }, (error) => callback(error));
@@ -313,24 +337,24 @@ class QQ extends EventEmitter{
     let req = http.request(new Option(this, {
       'method': 'GET',
       'hostname': 's.web2.qq.com',
-      'path': '/api/get_group_info_ext2?gcode=' + gid + '&vfwebqq=' + this.loginInfo.vfwebqq + '&t=' + Date.now(),
+      'path': '/api/get_group_info_ext2?gcode=' + this.groups[gid].code + '&vfwebqq=' + this.loginInfo.vfwebqq + '&t=' + Date.now(),
       'headers': {
         'Referer': 'http://d1.web2.qq.com/proxy.html?v=20151105001&callback=1&id=2',
         'Content-Type': 'utf-8',
         'Connection': 'keep-alive',
-        'Content-Length': data.length
       }
     }), reciver(this, (error, res, buffer) => {
       if (error) return callback(error);
       let data = JSON.parse(res.data.replace(/(\n)|(\r)/im, (s, n) => n ? '\\n' : '\\r')).result;
+      if (!data) return callback('群信息获取失败');
       let group = this.groups[gid];
       Object.assign(group, data.ginfo);
       group.member = {};
       data.minfo.forEach((member, index, array) => {
         group.member[member.uin] = member;
       });
-      data.cards.forEach(({id, card}, index, array) => {
-        group.member[id].card = card;
+      data.cards.forEach(({muin, card}, index, array) => {
+        group.member[muin].card = card;
       });
     }));
 
@@ -352,6 +376,7 @@ class QQ extends EventEmitter{
     }), reciver(this, (error, res, buffer) => {
       if (error) return callback(error);
       let data = JSON.parse(res.data.replace(/(\n)|(\r)/im, (s, n) => n ? '\\n' : '\\r')).result;
+      if (data) return callback('讨论组信息获取失败');
       let discuss = this.discusList[did];
       Object.assign(discuss, data.info);
       group.member = {};
@@ -415,14 +440,15 @@ class QQ extends EventEmitter{
   reciveMessage(data) {
     if (!data) return;
     data.forEach(({poll_type, value: message}, index, array) => {
-      message.style = message.content[0];
-      message.content = message.content[1];
+      if (message.content.length == 2) [message.style, message.content] = message.content;
+      if (message.content.length == 4) [message.reply, message.replyMessage, message.style, message.content] = message.content;
       switch (poll_type) {
         case 'group_message':
           message.from = this.groups[message.from_uin];
           message.to = this.friends[message.to_uin];
           if (!message.from.member) {
-            return new Promise((resolve, reject) => this.getGroupInfo(message.from.gid, () => {
+            return new Promise((resolve, reject) => this.getGroupInfo(message.from.gid, (error) => {
+              if (error) return reject(error);
               message.send = message.from.member[message.send_uin];
               this.emit('group_message', message);
             }));
@@ -434,7 +460,8 @@ class QQ extends EventEmitter{
           message.from = this.discusList[message.from_uin];
           message.to = this.friends[message.to_uin];
           if (!message.from.member) {
-            return new Promise((resolve, reject) => this.getDiscussInfo(message.from.did, () => {
+            return new Promise((resolve, reject) => this.getDiscussInfo(message.from.did, (error) => {
+              if (error) return reject(error);
               message.send = message.from.member[message.send_uin];
               this.emit('discuss_message', message);
             }));

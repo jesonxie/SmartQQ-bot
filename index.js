@@ -1,10 +1,11 @@
 const qq = require('./qq');
 
 let bot = qq.new();
-bot.login(() => {
+bot.login((error) => {
+  if (error) console.log(error);
   bot.initial();
 });
 
-bot.on('message', (e) => {
-  console.log((e.from.markname || e.from.nick) + ':' + e.content);
+bot.on('group_message', (e) => {
+  console.log((e.send.card || e.send.markname || e.send.nick) + ':' + e.content);
 });
