@@ -47,24 +47,26 @@ class QQ extends EventEmitter{
     });
   }
   // 获取二维码
-  getQrcode(callback) {
+  getQrcode(callback = handle) {
     let req = http.request(new Option(this, {
       'method': 'GET',
       'hostname': 'ssl.ptlogin2.qq.com',
       'path': '/ptqrshow?appid=501004106&e=2&l=M&s=3&d=72&v=4&t=' + Math.random() + '&daid=164&pt_3rd_aid=0',
-    }), reciver(this, (res, buffer) => {
-      this.confirmQRCodeState(callback);
+    }), reciver(this, (error, res, buffer) => {
+      if (error) return callback(error);
+      this.confirmQRCodeState(null, callback);
       return fs.writeFile('qrcode.png', buffer, (err) => {
         if(err) return console.log(err);
         console.log('QRcode refresh');
       });
     }));
 
+    req.on('error', (error) => callback(error));
     req.end();
   }
 
   // 确认二维码状态
-  confirmQRCodeState(callback) {
+  confirmQRCodeState(callback = handle) {
     let qrsig = this.CookieCan.qrsig;
     if (!qrsig) {
       for (let i = this.CookieCan.length - 1; i >= 0; i--) {
@@ -78,7 +80,8 @@ class QQ extends EventEmitter{
       'hostname': 'ssl.ptlogin2.qq.com',
       'path': '/ptqrlogin?u1=http%3A%2F%2Fw.qq.com%2Fproxy.html&ptqrtoken=' + pt.hash33(pt.cookie.get(qrsig)) +
       '&ptredirect=0&h=1&t=1&g=1&from_ui=1&ptlang=2052&action=0-0-' + Date.now() + '&js_ver=10230&js_type=1&login_sig=&pt_uistyle=40&aid=501004106&daid=164&mibao_css=m_webqq&',
-    }), reciver(this, (res, buffer) => {
+    }), reciver(this, (error, res, buffer) => {
+      if (error) return callback(error);
       let state, url, describe, nickName;
       let result = /^ptuiCB\('(.*?)',\s*'(.*?)',\s*'(.*?)',\s*'(.*?)',\s*'(.*?)',\s*'(.*?)'\)/.exec(res.data);
       if (result) [, state, , url, , describe, nickName] = result;
@@ -92,16 +95,17 @@ class QQ extends EventEmitter{
         console.log(describe);
         this.loginInfo = getQueryStringArgs(url);
         this.loginInfo.nickName = nickName;
-        return callback ? callback(url) : undefined;
+        return callback(null);
       }
       setTimeout(() => this.confirmQRCodeState(callback), 1000);
     }));
 
+    req.on('error', (error) => callback(error));
     req.end();
   }
 
   // 登录
-  login(callback) {
+  login(callback = handle) {
     new Promise((resolve, reject) => this.getQrcode(url => resolve(url)))
     .then((url) => new Promise((resolve, reject) => this.getPtwebqq(url, () => resolve())))
     .then(() => Promise.all([
@@ -110,12 +114,12 @@ class QQ extends EventEmitter{
     ]))
     .then(() => {
       this.poll();
-      if (callback) callback();
-    });
+      callback(null);
+    }, (error) => callback(error));
   }
 
   // 获取一系列登录相关 cookie
-  getPtwebqq(url, callback) {
+  getPtwebqq(url, callback = handle) {
     let index = url.lastIndexOf('/');
     let path = url.slice(index);
     let req = http.request(new Option(this, {
@@ -125,15 +129,17 @@ class QQ extends EventEmitter{
       'headers': {
         'upgrade-insecure-requests': '1',
       }
-    }), reciver(this, (res, buffer) => {
-      if (callback) callback();
+    }), reciver(this, (error, res, buffer) => {
+      if (error) return callback(error);
+      callback(null);
     }));
 
+    req.on('error', (error) => callback(error));
     req.end();
   }
 
   // 获取 vfwebqq
-  getVfwebqq(callback) {
+  getVfwebqq(callback = handle) {
     let req = http.request(new Option(this, {
       'method': 'GET',
       'hostname': 's.web2.qq.com',
@@ -143,16 +149,18 @@ class QQ extends EventEmitter{
         'referer': 'http://s.web2.qq.com/proxy.html?v=20130916001&callback=1&id=1',
         'connection': 'keep-alive'
       }
-    }), reciver(this, (res, buffer) => {
+    }), reciver(this, (error, res, buffer) => {
+      if (error) return callback(error);
       let data = JSON.parse(res.data);
+      if (!data.result) return callback('vfwebqq 获取失败');
       this.loginInfo.vfwebqq = data.result.vfwebqq;
-      if (callback) callback();
+      callback();
     }));
 
     req.end();
   }
 
-  login2(callback) {
+  login2(callback = handle) {
     let data = encodeURI('r={"ptwebqq":"","clientid":53999199,"psessionid":"","status":"online"}');
     let req = http.request(new Option(this, {
       'method': 'POST',
@@ -164,7 +172,8 @@ class QQ extends EventEmitter{
         'Referer': 'http://d1.web2.qq.com/proxy.html?v=20151105001&callback=1&id=2',
           'Content-Length': data.length
       }
-    }), reciver(this, (res, buffer) => {
+    }), reciver(this, (error, res, buffer) => {
+      if (error) return callback(error);
       let data = JSON.parse(res.data);
       let uin = data.result.uin;
       this.loginInfo.uin = uin;
@@ -176,9 +185,10 @@ class QQ extends EventEmitter{
       };
       this.loginInfo.psessionid = data.result.psessionid;
       console.log(data);
-      if (callback) callback();
+      callback();
     }));
 
+    req.on('error', (error) => callback(error));
     req.end(data);
   }
 
@@ -199,23 +209,23 @@ class QQ extends EventEmitter{
         'Content-Type': 'application/x-www-form-urlencoded',
         'Content-Length': data.length
       }
-    }), reciver(this, (res, buffer) => {
+    }), reciver(this, (error, res, buffer) => {
+      if (error) return console.log(error);
       let data;
       if (res.data) {
         data = JSON.parse(res.data.replace(/(\n)|(\r)/im, (s, n) => n ? '\\n' : '\\r')).result;
         if (data && data[0]) this.reciveMessage(data);
       }
       if (this.pollTime == time) {
-        return setTimeout(() => {
-          this.poll();
-        }, 0);
+        return setTimeout(() => this.poll(), 0);
       }
     }));
 
+    req.on('error', (error) => console.log(error));
     req.end(data);
   }
 
-  initial(callback) {
+  initial(callback = handle) {
     Promise.all([
       new Promise((resolve, reject) => this.getFriends(() => resolve())),
       new Promise((resolve, reject) => this.getGroups(() => resolve())),
@@ -223,13 +233,11 @@ class QQ extends EventEmitter{
     ])
     .then(() => new Promise((resolve, reject) => this.getRecentList(() => resolve)))
     .then(() => {
-      if (callback) callback();
-    }, (e) => {
-      console.log(e);
-    });
+      callback();
+    }, (error) => callback(error));
   }
 
-  getFriends(callback) {
+  getFriends(callback = handle) {
     let data = util.format('r={"vfwebqq":"%s","hash":"%s"}', this.loginInfo.vfwebqq, hash2(this.loginInfo.uin, ''));
     data = encodeURI(data);
     let req = http.request(new Option(this, {
@@ -243,15 +251,18 @@ class QQ extends EventEmitter{
         'content-type': 'application/x-www-form-urlencoded',
         'content-length': data.length,
       }
-    }), reciver(this, (res, buffer) => {
+    }), reciver(this, (error, res, buffer) => {
+      if (error) return callback(error);
       let data = JSON.parse(res.data);
       this.parseFriendsData(data.result);
       if (callback) callback();
     }));
+
+    req.on('error', (error) => callback(error));
     req.end(data);
   }
 
-  getGroups(callback) {
+  getGroups(callback = handle) {
     let data = util.format('r={"vfwebqq":"%s","hash":"%s"}', this.loginInfo.vfwebqq, hash2(this.loginInfo.uin, ''));
     data = encodeURI(data);
     let req = http.request(new Option(this, {
@@ -265,15 +276,18 @@ class QQ extends EventEmitter{
         'content-type': 'application/x-www-form-urlencoded',
         'content-length': data.length,
       }
-    }), reciver(this, (res, buffer) => {
+    }), reciver(this, (error, res, buffer) => {
+      if (error) return callback(error);
       let data = JSON.parse(res.data);
       this.parseGroupData(data.result);
       if (callback) callback();
     }));
+
+    req.on('error', (error) => callback(error));
     req.end(data);
   }
 
-  getDiscuss(callback) {
+  getDiscuss(callback = handle) {
     let req = http.request(new Option(this, {
       'method': 'GET',
       'hostname': 's.web2.qq.com',
@@ -284,15 +298,18 @@ class QQ extends EventEmitter{
         'connection': 'keep-alive',
         'content-type': 'utf-8',
       }
-    }), reciver(this, (res, buffer) => {
+    }), reciver(this, (error, res, buffer) => {
+      if (error) return callback(error);
       let data = JSON.parse(res.data);
       this.parseDiscussData(data.result);
       if (callback) callback();
     }));
+
+    req.on('error', (error) => callback(error));
     req.end();
   }
 
-  getGroupInfo(gid, callback) {
+  getGroupInfo(gid, callback = handle) {
     let req = http.request(new Option(this, {
       'method': 'GET',
       'hostname': 's.web2.qq.com',
@@ -303,7 +320,8 @@ class QQ extends EventEmitter{
         'Connection': 'keep-alive',
         'Content-Length': data.length
       }
-    }), reciver(this, (res, buffer) => {
+    }), reciver(this, (error, res, buffer) => {
+      if (error) return callback(error);
       let data = JSON.parse(res.data.replace(/(\n)|(\r)/im, (s, n) => n ? '\\n' : '\\r')).result;
       let group = this.groups[gid];
       Object.assign(group, data.ginfo);
@@ -315,10 +333,12 @@ class QQ extends EventEmitter{
         group.member[id].card = card;
       });
     }));
+
+    req.on('error', (error) => callback(error));
     req.end();
   }
 
-  getDiscussInfo(did, callback) {
+  getDiscussInfo(did, callback = handle) {
     let req = http.request(new Option(this, {
       'method': 'GET',
       'hostname': 's.web2.qq.com',
@@ -329,7 +349,8 @@ class QQ extends EventEmitter{
         'Connection': 'keep-alive',
         'Content-Length': data.length
       }
-    }), reciver(this, (res, buffer) => {
+    }), reciver(this, (error, res, buffer) => {
+      if (error) return callback(error);
       let data = JSON.parse(res.data.replace(/(\n)|(\r)/im, (s, n) => n ? '\\n' : '\\r')).result;
       let discuss = this.discusList[did];
       Object.assign(discuss, data.info);
@@ -339,10 +360,12 @@ class QQ extends EventEmitter{
         if (this.friends[member.uin]) member.markname = this.friends[member.uin].markname;
       });
     }));
+
+    req.on('error', (error) => callback(error));
     req.end();
   }
 
-  getRecentList(callback) {
+  getRecentList(callback = handle) {
     let data = util.format('r={"vfwebqq":"%s","clientid":53999199,"psessionid":"%s"}', this.loginInfo.vfwebqq, this.loginInfo.psessionid);
     data = encodeURI(data);
     let req = http.request(new Option(this, {
@@ -356,7 +379,8 @@ class QQ extends EventEmitter{
         'Connection': 'keep-alive',
         'Content-Length': data.length
       }
-    }), reciver(this, (res, buffer) => {
+    }), reciver(this, (error, res, buffer) => {
+      if (error) return callback(error);
       let data = JSON.parse(res.data).result;
       data.forEach(({type, uin}, index, array) => {
         let target;
@@ -368,6 +392,8 @@ class QQ extends EventEmitter{
         this.recentList.push(target);
       });
     }));
+
+    req.on('error', (error) => callback(error));
     req.end(data);
   }
 
@@ -460,7 +486,7 @@ const basicHeaders = {
 };
 
 // 对响应做基本的处理
-let reciver = (context, callback) => (res) => {
+let reciver = (context, callback = handle) => (res) => {
   let setCookies = res.headers['set-cookie'];
   // set cookie
   if (setCookies) {
@@ -501,13 +527,13 @@ let reciver = (context, callback) => (res) => {
 
     if (res.headers['content-encoding'] == 'gzip') {
       zlib.unzip(buffer, (err, buffer) => {
-        if (err) return console.log(err);
+        if (err) return callback(err);
         res.data = buffer.toString();
-        if (callback) callback(res, buffer);
+        callback(null, res, buffer);
       });
     } else {
       res.data = buffer.toString();
-      if (callback) callback(res, buffer);
+      callback(null, res, buffer);
     }
   });
 };
@@ -534,6 +560,10 @@ function getQueryStringArgs (url) {
         }
     }
     return args;
+}
+
+function handle(error) {
+  if (error) console.log(error);
 }
 
 // 以下代码复制或修改自 WebQQ 前端代码
