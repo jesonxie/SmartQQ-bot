@@ -17,6 +17,12 @@ class QQ extends EventEmitter{
     this.groupCategories = [];    // 群分组
     this.discusList = {};         // 讨论组列表
     this.recentList = [];         // 最近会话
+    this.defaultStyle = {
+      color: '000000',
+      name: '宋体',
+      size: '10',
+      style: '[0, 0, 0]'
+    };
 
     this.CookieCan.push({
       'key': 'pgv_pvi',
@@ -45,6 +51,18 @@ class QQ extends EventEmitter{
       'path': '/',
       'domain': 'qq.com'
     });
+
+    this.sequence = 0;
+    let t = (new Date()).getTime();
+    t = (t - t % 1000) / 1000;
+    t = t % 10000 * 10000;
+    this.t = t;
+  }
+
+  //获取msgId
+  getMsgId() {
+    this.sequence ++;
+    return this.t + this.sequence;
   }
   // 获取二维码
   getQrcode(callback = handle) {
@@ -125,7 +143,6 @@ class QQ extends EventEmitter{
       }))
     ]))
     .then(() => {
-      this.poll();
       callback(null);
     }, (error) => callback(error));
   }
@@ -173,7 +190,13 @@ class QQ extends EventEmitter{
   }
 
   login2(callback = handle) {
-    let data = encodeURI('r={"ptwebqq":"","clientid":53999199,"psessionid":"","status":"online"}');
+    let data = {
+      "ptwebqq": "",
+      "clientid": 53999199,
+      "psessionid": "",
+      "status": "online"
+    };
+    data = encodeURI('r=' + JSON.stringify(data));
     let req = http.request(new Option(this, {
       'method': 'POST',
       'hostname': 'd1.web2.qq.com',
@@ -189,14 +212,7 @@ class QQ extends EventEmitter{
       let data = JSON.parse(res.data);
       let uin = data.result.uin;
       this.loginInfo.uin = uin;
-      this.friends[uin] = {
-        'uin': uin,
-        'markname': '我',
-        'isSelf': 'true',
-        'nick': this.loginInfo.nickName
-      };
       this.loginInfo.psessionid = data.result.psessionid;
-      console.log(data);
       callback();
     }));
 
@@ -206,8 +222,13 @@ class QQ extends EventEmitter{
 
   // 轮询获取消息并保持登录状态
   poll() {
-    let data = util.format('r={"ptwebqq":"","clientid":53999199,"psessionid":"' + this.loginInfo.psessionid + '","key":""}');
-    data = encodeURI(data);
+    let data = {
+      "ptwebqq": "",
+      "clientid": 53999199,
+      "psessionid": this.loginInfo.psessionid,
+      "key": ""
+    };
+    data = encodeURI('r=' + JSON.stringify(data));
     let time = Date.now();
     this.pollTime = time;
     let req = http.request(new Option(this, {
@@ -225,7 +246,7 @@ class QQ extends EventEmitter{
       if (error) return console.log(error);
       let data;
       if (res.data) {
-        data = JSON.parse(res.data.replace(/(\n)|(\r)/im, (s, n) => n ? '\\n' : '\\r')).result;
+        data = JSON.parse(res.data.trim().replace(/(\n)|(\r)/im, (s, n) => n ? '\\n' : '\\r')).result;
         if (data && data[0]) this.reciveMessage(data);
       }
       if (this.pollTime == time) {
@@ -239,6 +260,10 @@ class QQ extends EventEmitter{
 
   initial(callback = handle) {
     Promise.all([
+      new Promise((resolve, reject) => this.getSelf((error) => {
+        if (error) return reject(error);
+        resolve();
+      })),
       new Promise((resolve, reject) => this.getFriends((error) => {
         if (error) return reject(error);
         resolve();
@@ -252,18 +277,24 @@ class QQ extends EventEmitter{
         resolve();
       }))
     ])
-    .then(() => new Promise((resolve, reject) => this.getRecentList((error) => {
-      if (error) return reject(error);
-      resolve();
-    })))
+    .then(() => {
+      this.poll();
+      return new Promise((resolve, reject) => this.getRecentList((error) => {
+        if (error) return reject(error);
+        resolve();
+      }));
+    })
     .then(() => {
       callback();
     }, (error) => callback(error));
   }
 
   getFriends(callback = handle) {
-    let data = util.format('r={"vfwebqq":"%s","hash":"%s"}', this.loginInfo.vfwebqq, hash2(this.loginInfo.uin, ''));
-    data = encodeURI(data);
+    let data = {
+      "vfwebqq": this.loginInfo.vfwebqq,
+      "hash": hash2(this.loginInfo.uin, '')
+    };
+    data = encodeURI('r=' + JSON.stringify(data));
     let req = http.request(new Option(this, {
       'method': 'POST',
       'hostname': 's.web2.qq.com',
@@ -278,6 +309,10 @@ class QQ extends EventEmitter{
     }), reciver(this, (error, res, buffer) => {
       if (error) return callback(error);
       let data = JSON.parse(res.data);
+      if (!data) {
+        console.log('好友列表获取失败，正在重新获取');
+        return setTimeout(() => this.getFriends(callback), 0);
+      }
       this.parseFriendsData(data.result);
       if (callback) callback();
     }));
@@ -287,8 +322,11 @@ class QQ extends EventEmitter{
   }
 
   getGroups(callback = handle) {
-    let data = util.format('r={"vfwebqq":"%s","hash":"%s"}', this.loginInfo.vfwebqq, hash2(this.loginInfo.uin, ''));
-    data = encodeURI(data);
+    let data = {
+      "vfwebqq": this.loginInfo.vfwebqq,
+      "hash": hash2(this.loginInfo.uin, '')
+    };
+    data = encodeURI('r=' + JSON.stringify(data));
     let req = http.request(new Option(this, {
       'method': 'POST',
       'hostname': 's.web2.qq.com',
@@ -303,6 +341,10 @@ class QQ extends EventEmitter{
     }), reciver(this, (error, res, buffer) => {
       if (error) return callback(error);
       let data = JSON.parse(res.data);
+      if (!data) {
+        console.log('群列表获取失败，正在重新获取');
+        return setTimeout(() => this.getGroups(callback), 0);
+      }
       this.parseGroupData(data.result);
       if (callback) callback();
     }));
@@ -325,7 +367,33 @@ class QQ extends EventEmitter{
     }), reciver(this, (error, res, buffer) => {
       if (error) return callback(error);
       let data = JSON.parse(res.data);
+      if (!data) {
+        console.log('讨论组列表获取失败，正在重新获取');
+        return setTimeout(() => this.getDiscuss(callback), 0);
+      }
       this.parseDiscussData(data.result);
+      if (callback) callback();
+    }));
+
+    req.on('error', (error) => callback(error));
+    req.end();
+  }
+
+  getSelf(callback = handle) {
+    let req = http.request(new Option(this, {
+      'method': 'GET',
+      'hostname': 's.web2.qq.com',
+      'path': '/api/get_self_info2?t=' + Date.now(),
+      'headers': {
+        'referer': 'http://s.web2.qq.com/proxy.html?v=20130916001&callback=1&id=1',
+        'origin': 'http://s.web2.qq.com',
+        'connection': 'keep-alive',
+        'content-type': 'utf-8',
+      }
+    }), reciver(this, (error, res, buffer) => {
+      if (error) return callback(error);
+      let data = JSON.parse(res.data);
+      this.parseSelf(data.result);
       if (callback) callback();
     }));
 
@@ -345,8 +413,11 @@ class QQ extends EventEmitter{
       }
     }), reciver(this, (error, res, buffer) => {
       if (error) return callback(error);
-      let data = JSON.parse(res.data.replace(/(\n)|(\r)/im, (s, n) => n ? '\\n' : '\\r')).result;
-      if (!data) return callback('群信息获取失败');
+      let data = JSON.parse(res.data.trim().replace(/(\n)|(\r)/im, (s, n) => n ? '\\n' : '\\r')).result;
+      if (!data) {
+        console.log('群信息获取失败，正在重新获取');
+        return setTimeout(() => this.getGroupInfo(gid, callback), 0);
+      }
       let group = this.groups[gid];
       Object.assign(group, data.ginfo);
       group.member = {};
@@ -375,8 +446,11 @@ class QQ extends EventEmitter{
       }
     }), reciver(this, (error, res, buffer) => {
       if (error) return callback(error);
-      let data = JSON.parse(res.data.replace(/(\n)|(\r)/im, (s, n) => n ? '\\n' : '\\r')).result;
-      if (data) return callback('讨论组信息获取失败');
+      let data = JSON.parse(res.data.trim().replace(/(\n)|(\r)/im, (s, n) => n ? '\\n' : '\\r')).result;
+      if (!data) {
+        console('讨论组信息获取失败，正在重新获取');
+        return setTimeout(() => this.getDiscussInfo(did, callback), 0);
+      }
       let discuss = this.discusList[did];
       Object.assign(discuss, data.info);
       group.member = {};
@@ -391,8 +465,12 @@ class QQ extends EventEmitter{
   }
 
   getRecentList(callback = handle) {
-    let data = util.format('r={"vfwebqq":"%s","clientid":53999199,"psessionid":"%s"}', this.loginInfo.vfwebqq, this.loginInfo.psessionid);
-    data = encodeURI(data);
+    let data = {
+      "vfwebqq": this.loginInfo.vfwebqq,
+      "clientid": 53999199,
+      "psessionid": this.loginInfo.psessionid
+    };
+    data = encodeURI('r=' + JSON.stringify(data));
     let req = http.request(new Option(this, {
       'method': 'POST',
       'hostname': 'd1.web2.qq.com',
@@ -407,6 +485,10 @@ class QQ extends EventEmitter{
     }), reciver(this, (error, res, buffer) => {
       if (error) return callback(error);
       let data = JSON.parse(res.data).result;
+      if (!data) {
+        console.log('Recent list 获取失败，正在重新获取');
+        return setTimeout(() => this.getRecentList(callback), 0);
+      }
       data.forEach(({type, uin}, index, array) => {
         let target;
         switch (type) {
@@ -416,6 +498,7 @@ class QQ extends EventEmitter{
         }
         this.recentList.push(target);
       });
+      callback();
     }));
 
     req.on('error', (error) => callback(error));
@@ -437,11 +520,18 @@ class QQ extends EventEmitter{
     dnamelist.forEach((discuss, index, array) => this.discusList[discuss.did] = discuss);
   }
 
+  parseSelf(data) {
+    data.markname = '我';
+    data.isSelf = true;
+    this.friends[data.uin] = data;
+    Object.assign(this.loginInfo, data);
+  }
+
   reciveMessage(data) {
     if (!data) return;
     data.forEach(({poll_type, value: message}, index, array) => {
-      if (message.content.length == 2) [message.style, message.content] = message.content;
-      if (message.content.length == 4) [message.reply, message.replyMessage, message.style, message.content] = message.content;
+      message.style = message.content.shift();
+      message.content = message.content.join(' ');
       switch (poll_type) {
         case 'group_message':
           message.from = this.groups[message.from_uin];
@@ -477,8 +567,113 @@ class QQ extends EventEmitter{
     });
   }
 
-  sendMessage(tid, type, message, {color = '000000', name = '微软雅黑', size = '10', style = '[0, 0, 0]'}) {
+  sendBuddyMessage(uid, message, {color = '000000', name = '宋体', size = '10', style = '[0, 0, 0]'} = this.defaultStyle) {
+    let data = {
+      "to": uid,
+      "content":"[\"" + message + "\",[\"font\",{\"name\":\"" + name + "\",\"size\":" + size + ",\"style\":" + style + ",\"color\":\"" + color + "\"}]]",
+      "face": this.loginInfo.face,
+      "clientid": 53999199,
+      "msg_id": this.getMsgId(),
+      "psessionid": this.loginInfo.psessionid
+    };
+    data = encodeURI('r=' + JSON.stringify(data));
 
+    let req = http.request(new Option(this, {
+      'method': 'POST',
+      'hostname': 'd1.web2.qq.com',
+      'path': '/channel/send_buddy_msg2',
+      'headers': {
+        'Referer': 'http://d1.web2.qq.com/cfproxy.html?v=20151105001&callback=1',
+        'Origin': 'http://d1.web2.qq.com',
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Connection': 'keep-alive',
+        'Content-Length': data.length
+      }
+    }), reciver(this, (error, res, buffer) => {
+      if (error) return console.log(error);
+      let data;
+      if (res.data) {
+        data = JSON.parse(res.data.trim().replace(/(\n)|(\r)/im, (s, n) => n ? '\\n' : '\\r')).result;
+        if (data && data[0]) this.reciveMessage(data);
+      }
+      return setTimeout(() => this.poll(), 0);
+    }));
+
+    req.on('error', (error) => {
+      setTimeout(() => this.poll(), 0);
+    });
+    req.end(data);
+  }
+
+  sendGroupMessage(gid, message, {color = '000000', name = '宋体', size = '10', style = '[0, 0, 0]'} = this.defaultStyle) {
+    let data = {
+      "group_uin": gid,
+      "content":"[\"" + message + "\",[\"font\",{\"name\":\"" + name + "\",\"size\":" + size + ",\"style\":" + style + ",\"color\":\"" + color + "\"}]]",
+      "face": this.loginInfo.face,
+      "clientid": 53999199,
+      "msg_id": this.getMsgId(),
+      "psessionid": this.loginInfo.psessionid
+    };
+    data = encodeURI('r=' + JSON.stringify(data));
+
+    let req = http.request(new Option(this, {
+      'method': 'POST',
+      'hostname': 'd1.web2.qq.com',
+      'path': '/channel/send_qun_msg2',
+      'headers': {
+        'Referer': 'http://d1.web2.qq.com/cfproxy.html?v=20151105001&callback=1',
+        'Origin': 'http://d1.web2.qq.com',
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Connection': 'keep-alive',
+        'Content-Length': data.length
+      }
+    }), reciver(this, (error, res, buffer) => {
+      if (error) return console.log(error);
+      let data;
+      if (res.data) {
+        data = JSON.parse(res.data.trim().replace(/(\n)|(\r)/im, (s, n) => n ? '\\n' : '\\r')).result;
+        if (data && data[0]) this.reciveMessage(data);
+      }
+      return setTimeout(() => this.poll(), 0);
+    }));
+
+    req.on('error', (error) => callback(error));
+    req.end(data);
+  }
+
+  sendDiscussMessage(did, message, {color = '000000', name = '宋体', size = '10', style = '[0, 0, 0]'} = this.defaultStyle) {
+    let data = {
+      "did": did,
+      "content":"[\"" + message + "\",[\"font\",{\"name\":\"" + name + "\",\"size\":" + size + ",\"style\":" + style + ",\"color\":\"" + color + "\"}]]",
+      "face": this.loginInfo.face,
+      "clientid": 53999199,
+      "msg_id": this.getMsgId(),
+      "psessionid": this.loginInfo.psessionid
+    };
+    data = encodeURI('r=' + JSON.stringify(data));
+    let req = http.request(new Option(this, {
+      'method': 'POST',
+      'hostname': 'd1.web2.qq.com',
+      'path': '/channel/send_discu_msg2',
+      'headers': {
+        'Referer': 'http://d1.web2.qq.com/cfproxy.html?v=20151105001&callback=1',
+        'Origin': 'http://d1.web2.qq.com',
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Connection': 'keep-alive',
+        'Content-Length': data.length
+      }
+    }), reciver(this, (error, res, buffer) => {
+      if (error) return console.log(error);
+      let data;
+      if (res.data) {
+      data = JSON.parse(res.data.trim().replace(/(\n)|(\r)/im, (s, n) => n ? '\\n' : '\\r')).result;
+        if (data && data[0]) this.reciveMessage(data);
+      }
+      return setTimeout(() => this.poll(), 0);
+    }));
+
+    req.on('error', (error) => callback(error));
+    req.end(data);
   }
 }
 
