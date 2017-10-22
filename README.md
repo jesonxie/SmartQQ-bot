@@ -1,6 +1,11 @@
 # SmartQQ-bot
 对 SmartQQ 协议的封装，方便 QQ 机器人的开发
 
+## 安装
+```shell
+npm install smartqqbot
+```
+
 ## 快速开始
 ```javascript
 const qq = require('smartqqbot');
