@@ -46,6 +46,7 @@ bot.on('discuss_message', (content, from, send) => {
     - [QQ.initialize([callback])](#qqinitializecallback)
     - [QQ.sendBuddyMessage(uid, message[, option])](#qqsendbuddymessageuid-message-option)
     - [QQ.sendGroupMessage(gid, message[, option])](#qqsendgroupmessagegid-message-option)
+    - [QQ.sendDiscussMessage(did, message[, option])](#qqsenddiscussmessagedid-message-option)
 
 ### new()
 
@@ -118,7 +119,7 @@ bot.on('discuss_message', (content, from, send) => {
 
 向群发送消息，其中 gid 非群号，需要从群列表中查询
 
-#### QQ.sendDiscuMessage(did, message[, option])
+#### QQ.sendDiscussMessage(did, message[, option])
 
 - `did`\<Number> 群 did
 - `message`\<String> 需发送的消息
