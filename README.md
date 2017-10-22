@@ -37,10 +37,10 @@ bot.on('discuss_message', (content, from, send) => {
     - ['message' 事件](#message-事件)
     - ['group_message' 事件](#group_message-事件)
     - ['discuss_message' 事件](#discuss_message-事件)
-    - [QQ.login([path, callback])](#QQloginpath,-callback)
-    - [QQ.initialize([callback])](#QQinitializecallback)
-    - [QQ.sendBuddyMessage(uid, message[, option])](#QQsendBuddyMessageuid-message-option)
-    - [QQ.sendGroupMessage(gid, message[, option])](#QQsendGroupMessagegid-message-option)
+    - [QQ.login([path, callback])](#qqloginpath-callback)
+    - [QQ.initialize([callback])](#qqinitializecallback)
+    - [QQ.sendBuddyMessage(uid, message[, option])](#qqsendbuddymessageuid-message-option)
+    - [QQ.sendGroupMessage(gid, message[, option])](#qqsendgroupmessagegid-message-option)
 
 ### new()
 
