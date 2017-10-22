@@ -32,15 +32,15 @@ bot.on('discuss_message', (content, from, send) => {
 ```
 
 ## API 说明
-- [new()](#new())
+- [new()](#new)
   - [QQ 类](#QQ-类)
-    - ['message' 事件](#'message'-事件)
-    - ['group_message' 事件](#'group_message'-事件)
-    - ['discuss_message' 事件](#'discuss_message'-事件)
-    - [QQ.login([path, callback])](#QQ.login([path,-callback]))
-    - [QQ.initialize([callback])](#QQ.initialize([callback]))
-    - [QQ.sendBuddyMessage(uid, message[, option])](#QQ.sendBuddyMessage(uid,-message[,-option]))
-    - [QQ.sendGroupMessage(gid, message[, option])](#QQ.sendGroupMessage(gid,-message[,-option]))
+    - ['message' 事件](#message-事件)
+    - ['group_message' 事件](#group_message-事件)
+    - ['discuss_message' 事件](#discuss_message-事件)
+    - [QQ.login([path, callback])](#QQloginpath,-callback)
+    - [QQ.initialize([callback])](#QQinitializecallback)
+    - [QQ.sendBuddyMessage(uid, message[, option])](#QQsendBuddyMessageuid-message-option)
+    - [QQ.sendGroupMessage(gid, message[, option])](#QQsendGroupMessagegid-message-option)
 
 ### new()
 
