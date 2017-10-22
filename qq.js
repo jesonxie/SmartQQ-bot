@@ -65,17 +65,17 @@ class QQ extends EventEmitter{
     return this.t + this.sequence;
   }
   // 获取二维码
-  getQrcode(callback = handle) {
+  getQrcode(path = 'qrcode.png', callback = handle) {
     let req = http.request(new Option(this, {
       'method': 'GET',
       'hostname': 'ssl.ptlogin2.qq.com',
       'path': '/ptqrshow?appid=501004106&e=2&l=M&s=3&d=72&v=4&t=' + Math.random() + '&daid=164&pt_3rd_aid=0',
     }), reciver(this, (error, res, buffer) => {
       if (error) return callback(error);
-      this.confirmQRCodeState(callback);
-      return fs.writeFile('qrcode.png', buffer, (err) => {
+      this.confirmQRCodeState(path, callback);
+      return fs.writeFile(path, buffer, (err) => {
         if(err) return console.log(err);
-        console.log('QRcode refresh');
+        console.log('二维码已刷新');
       });
     }));
 
@@ -84,7 +84,7 @@ class QQ extends EventEmitter{
   }
 
   // 确认二维码状态
-  confirmQRCodeState(callback = handle) {
+  confirmQRCodeState(path, callback = handle) {
     let qrsig = this.CookieCan.qrsig;
     if (!qrsig) {
       for (let i = this.CookieCan.length - 1; i >= 0; i--) {
@@ -105,7 +105,7 @@ class QQ extends EventEmitter{
       if (result) [, state, , url, , describe, nickName] = result;
       state = parseInt(state);
       if (state == 65) {
-        this.getQrcode();
+        this.getQrcode(path);
         return console.log(describe);
       }
       if (state == 0) {
@@ -115,7 +115,7 @@ class QQ extends EventEmitter{
         this.loginInfo.nickName = nickName;
         return callback(null, url);
       }
-      setTimeout(() => this.confirmQRCodeState(callback), 1000);
+      setTimeout(() => this.confirmQRCodeState(path, callback), 1000);
     }));
 
     req.on('error', (error) => callback(error));
@@ -123,8 +123,8 @@ class QQ extends EventEmitter{
   }
 
   // 登录
-  login(callback = handle) {
-    new Promise((resolve, reject) => this.getQrcode((error, url) => {
+  login(path, callback = handle) {
+    new Promise((resolve, reject) => this.getQrcode(path, (error, url) => {
       if (error) return reject(error);
       resolve(url);
     }))
@@ -258,7 +258,7 @@ class QQ extends EventEmitter{
     req.end(data);
   }
 
-  initial(callback = handle) {
+  initialize(callback = handle) {
     Promise.all([
       new Promise((resolve, reject) => this.getSelf((error) => {
         if (error) return reject(error);
@@ -540,11 +540,11 @@ class QQ extends EventEmitter{
             return new Promise((resolve, reject) => this.getGroupInfo(message.from.gid, (error) => {
               if (error) return reject(error);
               message.send = message.from.member[message.send_uin];
-              this.emit('group_message', message);
+              this.emit('group_message', message.content, message.from, message.send);
             }));
           }
           message.send = this.groups[message.from_uin].member[message.send_uin];
-          this.emit('group_message', message);
+          this.emit('group_message', message.content, message.from, message.send);
           break;
         case 'dicuss_message':
           message.from = this.discusList[message.from_uin];
@@ -553,15 +553,16 @@ class QQ extends EventEmitter{
             return new Promise((resolve, reject) => this.getDiscussInfo(message.from.did, (error) => {
               if (error) return reject(error);
               message.send = message.from.member[message.send_uin];
-              this.emit('discuss_message', message);
+              this.emit('discuss_message', message.content, message.from, message.send);
             }));
           }
-          this.emit('discuss_message', message);
+          message.send = message.from.member[message.send_uin];
+          this.emit('discuss_message', message.content, message.from, message.send);
           break;
         case 'message':
           message.from = this.friends[message.from_uin];
           message.to = this.friends[message.to_uin];
-          this.emit('message', message);
+          this.emit('message', message.content, message.from, message.to);
           break;
       }
     });

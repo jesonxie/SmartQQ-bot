@@ -1,0 +1,29 @@
+{
+  "name": "smartqqbot",
+  "version": "0.9.0",
+  "description": "对 SmartQQ 协议的封装，方便快速开发 QQ 机器人",
+  "main": "index.js",
+  "directories": {
+    "test": "test"
+  },
+  "dependencies": {},
+  "devDependencies": {},
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/demonly/SmartQQ-bot.git"
+  },
+  "keywords": [
+    "smartqq",
+    "qq",
+    "bot"
+  ],
+  "author": "demonly",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/demonly/SmartQQ-bot/issues"
+  },
+  "homepage": "https://github.com/demonly/SmartQQ-bot#readme"
+}
