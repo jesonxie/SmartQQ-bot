@@ -3,25 +3,30 @@
 
 ## 快速开始
 ```javascript
-const qq = require('../qq');
+const qq = require('smartqqbot');
 
 let bot = qq.new();
+// 登录
 bot.login((error) => {
   if (error) console.log(error);
+  // 初始化
   bot.initialize();
 });
 
-bot.on('group_message', (e) => {
-  console.log((e.send.card || e.send.markname || e.send.nick) + ': ' + e.content + ' from: ' + e.from.name);
+// 打印群消息
+bot.on('group_message', (content, from, send) => {
+  console.log((send.card || send.markname || send.nick) + ': ' + content + ' from: ' + from.name);
 });
 
-bot.on('message', (e) => {
-  console.log((e.from.markname || e.from.nick) + ': ' + e.content);
-  bot.sendBuddyMessage(e.from.uin, e.content);
+// 打印联系人消息并回复同样的内容
+bot.on('message', (content, from, to) => {
+  console.log((from.markname || from.nick) + ': ' + content);
+  bot.sendBuddyMessage(from.uin, content);
 });
 
-bot.on('discuss_message', (e) => {
-  console.log((e.send.markname || e.send.nick) + ' : ' + e.content + ' from ' + e.from.name);
+// 打印讨论组消息
+bot.on('discuss_message', (content, from, send) => {
+  console.log((send.markname || send.nick) + ' : ' + content + ' from ' + from.name);
 });
 
 ```
