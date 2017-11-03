@@ -5,7 +5,7 @@ const util = require('util');
 const EventEmitter = require('events');
 
 class QQ extends EventEmitter{
-  constructor() {
+  constructor(maxMassage = 1000, retryTime = 3000) {
     super();
     this.CookieCan = [];          // Cookie 罐
     this.logined = false;         // 登录状态
@@ -17,6 +17,9 @@ class QQ extends EventEmitter{
     this.groupCategories = [];    // 群分组
     this.discusList = {};         // 讨论组列表
     this.recentList = [];         // 最近会话
+    this.maxMassage = maxMassage; // 单会话最大消息数
+    this.retryTime = retryTime;    // 错误重试时间
+    this.self = {};               // 本人
     this.defaultStyle = {
       color: '000000',
       name: '宋体',
@@ -50,6 +53,13 @@ class QQ extends EventEmitter{
       'value': 'jcnicGbKPg',
       'path': '/',
       'domain': 'qq.com'
+    });
+
+    this.on('__message__', (next, message) => {
+      if (!message.from.session) message.from.session = new Session(this, message.from);
+      let e = new Message(this, message.content, message.from, message.send, message.to);
+      message.from.session.append(e);
+      this.emit(next, e);
     });
 
     this.sequence = 0;
@@ -311,7 +321,7 @@ class QQ extends EventEmitter{
       let data = JSON.parse(res.data);
       if (!data) {
         console.log('好友列表获取失败，正在重新获取');
-        return setTimeout(() => this.getFriends(callback), 0);
+        return setTimeout(() => this.getFriends(callback), this.retryTime);
       }
       this.parseFriendsData(data.result);
       if (callback) callback();
@@ -343,7 +353,7 @@ class QQ extends EventEmitter{
       let data = JSON.parse(res.data);
       if (!data) {
         console.log('群列表获取失败，正在重新获取');
-        return setTimeout(() => this.getGroups(callback), 0);
+        return setTimeout(() => this.getGroups(callback), this.retryTime);
       }
       this.parseGroupData(data.result);
       if (callback) callback();
@@ -369,7 +379,7 @@ class QQ extends EventEmitter{
       let data = JSON.parse(res.data);
       if (!data) {
         console.log('讨论组列表获取失败，正在重新获取');
-        return setTimeout(() => this.getDiscuss(callback), 0);
+        return setTimeout(() => this.getDiscuss(callback), this.retryTime);
       }
       this.parseDiscussData(data.result);
       if (callback) callback();
@@ -416,13 +426,14 @@ class QQ extends EventEmitter{
       let data = JSON.parse(res.data.trim().replace(/(\n)|(\r)/im, (s, n) => n ? '\\n' : '\\r')).result;
       if (!data) {
         console.log('群信息获取失败，正在重新获取');
-        return setTimeout(() => this.getGroupInfo(gid, callback), 0);
+        return setTimeout(() => this.getGroupInfo(gid, callback), this.retryTime);
       }
       let group = this.groups[gid];
       Object.assign(group, data.ginfo);
       group.member = {};
       data.minfo.forEach((member, index, array) => {
         group.member[member.uin] = member;
+        member.friend = this.friends[member.uin];
       });
       data.cards.forEach(({muin, card}, index, array) => {
         group.member[muin].card = card;
@@ -449,14 +460,15 @@ class QQ extends EventEmitter{
       let data = JSON.parse(res.data.trim().replace(/(\n)|(\r)/im, (s, n) => n ? '\\n' : '\\r')).result;
       if (!data) {
         console('讨论组信息获取失败，正在重新获取');
-        return setTimeout(() => this.getDiscussInfo(did, callback), 0);
+        return setTimeout(() => this.getDiscussInfo(did, callback), this.retryTime);
       }
       let discuss = this.discusList[did];
       Object.assign(discuss, data.info);
       group.member = {};
       data.mem_info.forEach((member, index, array) => {
         discuss.member[member.uin] = member;
-        if (this.friends[member.uin]) member.markname = this.friends[member.uin].markname;
+        member.friend = this.friends[member.uin];
+        if (member.friend) member.markname = member.friend.markname;
       });
     }));
 
@@ -487,7 +499,7 @@ class QQ extends EventEmitter{
       let data = JSON.parse(res.data).result;
       if (!data) {
         console.log('Recent list 获取失败，正在重新获取');
-        return setTimeout(() => this.getRecentList(callback), 0);
+        return setTimeout(() => this.getRecentList(callback), this.retryTime);
       }
       data.forEach(({type, uin}, index, array) => {
         let target;
@@ -507,23 +519,23 @@ class QQ extends EventEmitter{
 
   parseFriendsData({categories, friends: fris, info, marknames, vipinfo}) {
     categories.forEach((catg, index, array) => (this.friendsCategories[catg.sort] = catg));
-    fris.forEach((friend, index, array) => (this.friends[friend.uin] = friend));
-    info.forEach((infor, index, array) => Object.assign(this.friends[infor.uin], infor));
+    fris.forEach((friend, index, array) => (this.friends[friend.uin] = new Friend(this, friend.uin, friend.categories)));
     marknames.forEach((markname, index, array) => this.friends[markname.uin].markname = markname.markname);
   }
 
   parseGroupData({gnamelist}) {
-    gnamelist.forEach((group, index, array) => this.groups[group.gid] = group);
+    gnamelist.forEach((group, index, array) => this.groups[group.gid] = new Group(this, group.gid, group.name));
   }
 
   parseDiscussData({dnamelist}) {
-    dnamelist.forEach((discuss, index, array) => this.discusList[discuss.did] = discuss);
+    dnamelist.forEach((discuss, index, array) => this.discusList[discuss.did] = new Discuss(this, discuss.did, discuss.name));
   }
 
   parseSelf(data) {
-    data.markname = '我';
-    data.isSelf = true;
-    this.friends[data.uin] = data;
+    let self = this.friends[data.uin] = new Friend(this, data.uin, 0);
+    this.self = self;
+    self.markname = '我';
+    self.isSelf = true;
     Object.assign(this.loginInfo, data);
   }
 
@@ -539,12 +551,14 @@ class QQ extends EventEmitter{
           if (!message.from.member) {
             return new Promise((resolve, reject) => this.getGroupInfo(message.from.gid, (error) => {
               if (error) return reject(error);
-              message.send = message.from.member[message.send_uin];
-              this.emit('group_message', message.content, message.from, message.send);
+              message.send = this.groups[message.from_uin].member[message.send_uin];
+              let e = new Message(this, message.content, message.from, message.send, message.to);
+              this.emit('__message__', 'group_message', message);
             }));
           }
           message.send = this.groups[message.from_uin].member[message.send_uin];
-          this.emit('group_message', message.content, message.from, message.send);
+          let e = new Message(this, message.content, message.from, message.send, message.to);
+          this.emit('__message__', 'group_message', message);
           break;
         case 'dicuss_message':
           message.from = this.discusList[message.from_uin];
@@ -553,24 +567,27 @@ class QQ extends EventEmitter{
             return new Promise((resolve, reject) => this.getDiscussInfo(message.from.did, (error) => {
               if (error) return reject(error);
               message.send = message.from.member[message.send_uin];
-              this.emit('discuss_message', message.content, message.from, message.send);
+              this.emit('__message__', 'discuss_message', message);
             }));
           }
           message.send = message.from.member[message.send_uin];
-          this.emit('discuss_message', message.content, message.from, message.send);
+          this.emit('__message__', 'discuss_message', message);
           break;
         case 'message':
           message.from = this.friends[message.from_uin];
           message.to = this.friends[message.to_uin];
-          this.emit('message', message.content, message.from, message.to);
+          this.emit('__message__', 'message', message);
           break;
       }
     });
   }
 
-  sendBuddyMessage(uid, message, {color = '000000', name = '宋体', size = '10', style = '[0, 0, 0]'} = this.defaultStyle) {
+  sendBuddyMessage(uin, message, {color = '000000', name = '宋体', size = '10', style = '[0, 0, 0]'} = this.defaultStyle) {
+    let target = this.friends[uin];
+    if (!target.session) target.session = new Session(this, target);
+    target.session.append(new Message(this, message, self, self, target));
     let data = {
-      "to": uid,
+      "to": uin,
       "content":"[\"" + message + "\",[\"font\",{\"name\":\"" + name + "\",\"size\":" + size + ",\"style\":" + style + ",\"color\":\"" + color + "\"}]]",
       "face": this.loginInfo.face,
       "clientid": 53999199,
@@ -607,6 +624,9 @@ class QQ extends EventEmitter{
   }
 
   sendGroupMessage(gid, message, {color = '000000', name = '宋体', size = '10', style = '[0, 0, 0]'} = this.defaultStyle) {
+    let target = this.groups[gid];
+    if (!target.session) target.session = new Session(this, target);
+    target.session.append(new Message(this, message, target, self, self));
     let data = {
       "group_uin": gid,
       "content":"[\"" + message + "\",[\"font\",{\"name\":\"" + name + "\",\"size\":" + size + ",\"style\":" + style + ",\"color\":\"" + color + "\"}]]",
@@ -643,6 +663,9 @@ class QQ extends EventEmitter{
   }
 
   sendDiscussMessage(did, message, {color = '000000', name = '宋体', size = '10', style = '[0, 0, 0]'} = this.defaultStyle) {
+    let target = this.discusList[did];
+    if (!target.session) target.session = new Session(this, target);
+    target.session.append(new Message(this, message, target, self, self));
     let data = {
       "did": did,
       "content":"[\"" + message + "\",[\"font\",{\"name\":\"" + name + "\",\"size\":" + size + ",\"style\":" + style + ",\"color\":\"" + color + "\"}]]",
@@ -678,6 +701,89 @@ class QQ extends EventEmitter{
   }
 }
 
+class Friend {
+  constructor(self, uin, categories) {
+    this.uin = uin;
+    this.categories = self.friendsCategories[categories];
+    this.possessor = self;
+  }
+
+  send(message, style) {
+    this.possessor.sendBuddyMessage(this.uin, message, style);
+  }
+}
+
+class Group {
+  constructor(self, gid, name) {
+    this.possessor = self;
+    this.gid = gid;
+    this.name = name;
+  }
+
+  getInfo(callback) {
+    this.possessor.getGroupInfo(this.gid, callback);
+  }
+
+  send(message, style) {
+    this.possessor.sendGroupMessage(this.gid, message, style);
+  }
+}
+
+class Discuss {
+  constructor(self, did, name) {
+    this.did = did;
+    this.possessor = self;
+    this.name = name;
+  }
+
+  getInfo(callback) {
+    this.possessor.getDiscussInfo(this.did, callback);
+  }
+
+  send(message, style) {
+    this.possessor.sendDiscussMessage(this.did, message, style);
+  }
+}
+
+class Session {
+  constructor(self, target) {
+    this.possessor = self;
+    this.target = target;
+    this.messages = [];
+  }
+
+  append(message) {
+    this.messages.push(message);
+    this.possessor.messages.push(this);
+    if (this.messages.length > this.possessor.maxMassage) {
+      this.clear(1);
+    }
+  }
+
+  clear(num = this.messages.length) {
+    this.messages.splice(0, num);
+  }
+}
+
+class Message {
+  constructor(self, content, from, send, to) {
+    this.possessor = self;
+    this.content = content;
+    this.from = from;
+    this.send = send;
+    this.to = to;
+    this.time = Date.now();
+    if (!from.session) {
+      from.session = new Session(self, from);
+    }
+    (this.from.isSelf ? this.to : this.from).session.append(this);
+  }
+
+  reply(message, style) {
+    this.from.send(message, style);
+  }
+}
+
 // 公用函数
 class Option {
   constructor(context, obj) {
@@ -685,8 +791,7 @@ class Option {
     Object.assign(obj.headers, basicHeaders);
     let cookies = {};
     context.CookieCan.forEach(({key, value, path, domain}, index, CookieCan) => {
-      if(obj.hostname.indexOf(domain.replace('*', '')) != -1 &&
-      obj.path.indexOf(path) != -1) {
+      if(obj.hostname.endsWith(domain.trim('*')) && obj.path.startsWith(path)) {
         if (cookies[key] && cookies[key].domain.length > domain.length) return;
         if (key == 'airkey') return;
         cookies[key] = {key, value, path, domain};
@@ -854,4 +959,4 @@ function r(c) {
 }
 
 /* jshint ignore:end */
-exports.new = () => new QQ();
+module.exports = QQ;

@@ -1,20 +1,19 @@
 const qq = require('../qq');
 
-let bot = qq.new();
-bot.login((error) => {
+let bot = new qq();
+bot.login('qrcode.png', (error) => {
   if (error) console.log(error);
   bot.initialize();
 });
 
-bot.on('group_message', (content, from, send) => {
-  console.log((send.card || send.markname || send.nick) + ': ' + content + ' from: ' + from.name);
+bot.on('group_message', (message) => {
+  console.log((message.send.card || message.send.markname || message.send.nick) + ': ' + message.content + ' from: ' + message.from.name);
 });
 
-bot.on('message', (content, from, to) => {
-  console.log((from.markname || from.nick) + ': ' + content);
-  bot.sendBuddyMessage(from.uin, content);
+bot.on('message', (message) => {
+  console.log((message.from.markname || message.from.nick) + ': ' + message.content);
 });
 
 bot.on('discuss_message', (content, from, send) => {
-  console.log((send.markname || send.nick) + ' : ' + content + ' from ' + from.name);
+  console.log((message.send.markname || message.send.nick) + ' : ' + message.content + ' from ' + message.from.name);
 });
