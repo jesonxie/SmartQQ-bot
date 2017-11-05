@@ -524,7 +524,7 @@ class QQ extends EventEmitter{
   }
 
   parseGroupData({gnamelist}) {
-    gnamelist.forEach((group, index, array) => this.groups[group.gid] = new Group(this, group.gid, group.name));
+    gnamelist.forEach((group, index, array) => this.groups[group.gid] = new Group(this, group.gid, group.code, group.name));
   }
 
   parseDiscussData({dnamelist}) {
@@ -714,10 +714,11 @@ class Friend {
 }
 
 class Group {
-  constructor(self, gid, name) {
+  constructor(self, gid, code, name) {
     this.possessor = self;
     this.gid = gid;
     this.name = name;
+    this.code = code;
   }
 
   getInfo(callback) {
